@@ -1,0 +1,8 @@
+/.vscode
+/test_folder
+/.history
+.gz
+.python-version
+/__pycache__
+/dataset
+

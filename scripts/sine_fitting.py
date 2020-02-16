@@ -89,10 +89,6 @@ def plot(data, *args, **kwargs):
     return plt.plot(x, y, *args, **kwargs)
 
 
-for _ in range(3):
-    plt.title('Sinusoid examples')
-    plot(SinusoidGenerator(K=100).equally_spaced_samples())
-plt.show()
 
 def generate_dataset(K, train_size=20000, test_size=10):
     '''Generate train and test dataset.
@@ -118,7 +114,10 @@ class SineModel(keras.Model):
         x = keras.activations.relu(self.hidden2(x))
         x = self.out(x)
         return x
-
+    
+def restore_model(model, path):
+    model.load_weights(path)
+    
 def loss_function(pred_y, y):
   return keras_backend.mean(keras.losses.mean_squared_error(y, pred_y))
 
@@ -128,7 +127,7 @@ def np_to_tensor(list_of_numpy_objs):
 
 def compute_loss(model, x, y, loss_fn=loss_function):
     logits = model.forward(x)
-    mse = loss_fn(y, logits)
+    mse = loss_fn(logits, y)
     return mse, logits
 
 
@@ -172,7 +171,9 @@ def train_model(dataset, epochs=1, lr=0.001, log_steps=1000):
         plt.show()
     return model
 # uncomment to train a regular neural network
-# neural_net = train_model(train_ds)
+neural_net = SineModel()
+neural_net = train_model(train_ds)
+neural_net.save_weights('../weights/neural_net', overwrite=True)
 
 def plot_model_comparison_to_average(model, ds, model_name='neural network', K=10):
     '''Compare model to average.
@@ -378,6 +379,7 @@ def train_maml(model, epochs, dataset, lr_inner=0.01, batch_size=1, log_steps=10
                 start = time.time()
         plt.plot(losses)
         plt.show()
+    model.save_weights('../weights/maml_neural_net', overwrite=True)
 
 
 maml = SineModel()

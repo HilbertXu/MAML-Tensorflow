@@ -3,6 +3,5 @@
 /.history
 .gz
 .python-version
-/__pycache__
 /dataset
-
+*/__pycache__/

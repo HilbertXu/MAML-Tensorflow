@@ -18,92 +18,58 @@ class MetaLearner(tf.keras.Model):
     """
     Meta Learner
     """
-    def __init__(self):
+    def __init__(self, filters=32, img_size=[84,84,3], n_way=5, model_name='maml', training=True):
         """
-        :param: args from main.py
+        :param filters: Number of filters in conv layers
+        :param img_size: Size of input image, [84, 84, 3] for miniimagenet
+        :param n_way: Number of classes
+        :param name: Name of model
         """
         super().__init__()
         # for miniimagener dataset set conv2d kernel size=[32, 3, 3]
         # for ominiglot dataset set conv2d kernel size=[64, 3, 3]
-        self.filters     = 32
-        self.img_channel = 3
-        self.img_size    = 84
-        self.op_channel  = 5
-     
+        self.filters     = filters
+        self.img_size    = img_size
+        self.op_channel  = n_way
+        self.model_name  = model_name   
+        self.training    = training 
+
+        # Build model layers
+        self.conv_1 = tf.keras.layers.Conv2D(input_shape=(-1, 84, 84, 3), filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.bn_1 = tf.keras.layers.BatchNormalization(axis=-1)
+        self.max_pool_1 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
+
+        self.conv_2 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.bn_2 = tf.keras.layers.BatchNormalization(axis=-1)
+        self.max_pool_2 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
+
+        self.conv_3 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.bn_3 = tf.keras.layers.BatchNormalization(axis=-1)
+        self.max_pool_3 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
+
+        self.conv_4 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.bn_4 = tf.keras.layers.BatchNormalization(axis=-1)
+        self.max_pool_4 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
+
+        self.fc = tf.keras.layers.Flatten()
+        self.out = tf.keras.layers.Dense(self.op_channel)
+        
     
-    def build(self):
-        # Default to use Xavier Initializer
-        self.input_layer  = tf.keras.layers.Conv2D(input_shape=(-1, self.img_size, self.img_size, self.img_channel), filters=self.filters,
-                                                                kernel_size=(3,3), strides=(1,1),
-                                                                padding='SAME', kernel_initializer='glorot_normal')
-        self.conv2d_layer = tf.keras.layers.Conv2D(filters=self.filters, kernel_size=(3,3),
-                                                   strides=(1,1), padding='SAME',
-                                                   kernel_initializer='glorot_uniform')
-        self.max_pooling  = tf.keras.layers.MaxPool2D(pool_size=(2,2))
-        self.batch_norm   = tf.keras.layers.BatchNormalization(axis=-1)
-        self.flatten      = tf.keras.layers.Flatten()
-        self.dense        = tf.keras.layers.Dense(5, activation="softmax")
+    def forward(self, x):
+        # Conv block #1
+        x = tf.keras.activations.relu(self.max_pool_1(self.bn_1(self.conv_1(x), training=self.training)))
+        # Conv block #2
+        x = tf.keras.activations.relu(self.max_pool_2(self.bn_2(self.conv_2(x), training=self.training)))
+        # Conv block #3
+        x = tf.keras.activations.relu(self.max_pool_3(self.bn_3(self.conv_3(x), training=self.training)))
+        # Conv block #4
+        x = tf.keras.activations.relu(self.max_pool_4(self.bn_4(self.conv_4(x), training=self.training)))
 
-                                          
-    def forward(self, inputs):
-        # set layers
-        self.build()
-        # input conv block
-        x = self.input_layer(inputs)
-        x = self.batch_norm(x)
-        x = tf.keras.activations.relu(x)
-        x = self.max_pooling(x)
-
-        # conv block #2
-        x = self.conv2d_layer(x)
-        x = self.batch_norm(x)
-        x = tf.keras.activations.relu(x)
-        x = self.max_pooling(x)
-
-        # conv block #3
-        x = self.conv2d_layer(x)
-        x = self.batch_norm(x)
-        x = tf.keras.activations.relu(x)
-        x = self.max_pooling(x)
-
-        # conv block #4
-        x = self.conv2d_layer(x)
-        x = self.batch_norm(x)
-        x = tf.keras.activations.relu(x)
-        x = self.max_pooling(x)
-
-        # FC layers
-        x = self.flatten(x)
-        x = self.dense(x)
-        return x
-
-
-def create_model_via_keras():
-    model = tf.keras.models.Sequential([
-            tf.keras.layers.Input(shape=[84,84,3]),
-            tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), activation='relu', 
-                                   padding='same', kernel_initializer='glorot_normal', name='conv_1'),
-            tf.keras.layers.BatchNormalization(axis=-1),
-            tf.keras.layers.MaxPool2D(pool_size=(2,2)),
-
-            tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), activation='relu', 
-                                   padding='same', kernel_initializer='glorot_normal', name='conv_2'),
-            tf.keras.layers.BatchNormalization(axis=-1),
-            tf.keras.layers.MaxPool2D(pool_size=(2,2)),
-
-            tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), activation='relu', 
-                                   padding='same', kernel_initializer='glorot_normal', name='conv_3'),
-            tf.keras.layers.BatchNormalization(axis=-1),
-            tf.keras.layers.MaxPool2D(pool_size=(2,2)),
-
-            tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), activation='relu', 
-                                   padding='same', kernel_initializer='glorot_normal', name='conv_4'),
-            tf.keras.layers.BatchNormalization(axis=-1),
-            tf.keras.layers.MaxPool2D(pool_size=(2,2)),
-
-            tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(5, activation='softmax')
-        ], name='maml')
-    print (model.summary())
-    return model
-
+        # Fully Connect Layer
+        x = self.fc(x)
+        # Logits Output
+        logits = self.out(x)
+        # Prediction
+        pred = tf.keras.activations.softmax(logits)
+        
+        return logits, pred

@@ -3,16 +3,16 @@
     Author: Hilbert XU
     Abstract: MetaLeaner model
 """
-# @TODO
-# change model to keras
-
 
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.keras.backend as keras_backend
 import os
 import numpy as np 
+import cv2
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '/gpu:0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 class MetaLearner(tf.keras.Model):
     """
@@ -73,3 +73,4 @@ class MetaLearner(tf.keras.Model):
         pred = tf.keras.activations.softmax(logits)
         
         return logits, pred
+            

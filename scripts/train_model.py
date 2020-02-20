@@ -12,7 +12,7 @@ import numpy as np
 import tensorflow as tf 
 import time
 import matplotlib.pyplot as plt
-from task_generator import generate_dataset
+from task_generator import generate_dataset, TaskGenerator
 from meta_learner import MetaLearner
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -49,24 +49,25 @@ def compute_gradients(model, x, y, loss_fn=loss_fn):
 def apply_gradients(optimizer, gradients, variables):
     optimizer.apply_gradients(zip(gradients, variables))
 
-def regular_train_step(input_list):
-    model, x, y, optimizer = input_list
+def regular_train_step(model, x, y, optimizer):
     gradients = compute_gradients(model, x, y)
     apply_gradients(optimizer, gradients, model.trainable_variables)
     return model
 
-def maml_train_step(model, train_ds, epochs=3, inner_lr=0.01, meta_batchsz=4, log_step=1000, config=None):
+def maml_train_step(model, train_ds, epochs=1, inner_lr=0.01, meta_batchsz=4, log_step=1000, config=None):
     if config is not None:
         print ('load train config')
         n_way = config['n_way']
         k_shot = config['k_shot']
         k_query = config['k_query']
+        total_steps = config['total_steps']
         print ('Start training process of {}-way {}-shot {}-query'.format(n_way, k_shot, k_query))
     else:
         print ('No config input, set to default config')
         n_way = 5
         k_shot = 1
         k_query = 15
+        total_steps = 200000
         print ('Start training process of {}-way {}-shot {}-query'.format(n_way, k_shot, k_query))
     
     # Initialize optimizer
@@ -83,12 +84,13 @@ def maml_train_step(model, train_ds, epochs=3, inner_lr=0.01, meta_batchsz=4, lo
         # For each task, containing support set & query set
         # For support set: k_shot images
         # For query set: k_query images
-        for i, ds in enumerate(train_ds):
+        for i in range(total_steps):
             if i % 10 == 0 and i > 0:
-                print ('[STEP. {}] current loss: {}, 10 steps for: {} seconds'.format(i, query_losses[-1], time.time()-start))
+                print ('[STEP. {}] current loss: {}, current_acc: {}, Time to run 10 steps: {}'.format(i, query_losses[-1], query_accs[-1],time.time()-start))
                 # print (query_losses)
                 start = time.time()
-            batch_sets = ds.batch()
+            batch_sets = train_ds.batch()
+            train_ds.print_label_map()
             # Set the spt_tape to be persistent
             # cause we use support_x to update the fast weights each task
             with tf.GradientTape(persistent=True) as spt_tape:  
@@ -132,11 +134,58 @@ def maml_train_step(model, train_ds, epochs=3, inner_lr=0.01, meta_batchsz=4, lo
                     # the second order gradients
                     gradients = query_tape.gradient(batch_loss, model.trainable_variables)
                     apply_gradients(optimizer, gradients, model.trainable_variables)
+    # visulize training process
     acc = plt.plot(query_accs)
     loss = plt.plot(query_losses)
     plots = [acc, loss]
     legends = ['Accuracy', 'Loss']
     plt.legend(plots, legends)
+    plt.show()
+    return model
+
+def eval_model_test(model, test_ds=None, lr=0.01, test_config=None):
+    if test_ds is None and test_config is not None:
+        test_ds = TaskGenerator(test_config)
+    else:
+        test_config = {
+              'mode':'test',
+              'dataset':'miniimagenet',
+              'n_way':5, 
+              'k_shot':1,
+              'k_query':15, 
+              'meta_batchsz':1,
+              'num_steps':(0, 1, 10)
+        }
+    optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+    test_ds = TaskGenerator(config=test_config)
+    # in test mode, task generator return a batch dataset containing only one new task
+    batch_set = test_ds.batch()[0]
+    # test_ds.print_label_map()
+
+    def _eval_model_test(batch_set):
+        loss_result = []
+        acc_result = []
+        support_x, support_y, query_x, query_y = batch_set
+        # use one task to finetune the trained net
+        num_steps = test_config['num_steps']
+        # Test process
+        for step in range(np.max(num_steps)):
+            if step == 0:
+                # Record the initial accuracy and loss
+                spt_loss, spt_acc = compute_loss(model, support_x, support_y)
+                loss_result.append((0, spt_loss))
+                acc_result.append((0, spt_acc))
+            regular_train_step(model, query_x, query_y, optimizer)
+            if step != 0 and step in num_steps:
+                spt_loss, spt_acc = compute_loss(model, support_x, support_y)
+                loss_result.append((step, spt_loss))
+                acc_result.append((step,spt_acc))
+        result = [loss_result, acc_result]
+        return result
+    test_loss, test_acc = _eval_model_test(batch_set)
+    plots = [plt.plot(test_loss), plt.plot(test_acc)]
+    legends = ['test loss', 'test accuracy']
+    plt.plot(plots, legends)
     plt.show()
 
 
@@ -152,11 +201,23 @@ if __name__ == '__main__':
               'n_way':5, 
               'k_shot':1,
               'k_query':15, 
-              'img_size':(84, 84, 3),
-              'meta_batchsz':4
+              'img_size':[84, 84, 3],
+              'meta_batchsz':4,
+              'total_steps':200000
+             }
+    test_config = {
+              'mode':'test',
+              'dataset':'miniimagenet',
+              'n_way':5, 
+              'k_shot':1,
+              'k_query':15, 
+              'meta_batchsz':4,
+              'img_size':[84, 84, 3],
+              'num_steps':(0, 1, 10)
              }
     model = MetaLearner()
-    train_ds, test_ds = generate_dataset(train_size=100, test_size=1,config=train_config)
-    maml_train_step(model, train_ds, config=train_config)
+    train_ds = TaskGenerator(train_config)
+    model = maml_train_step(model, train_ds, config=train_config)
+    eval_model_test(model, test_config=test_config)
     
     

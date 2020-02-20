@@ -83,14 +83,27 @@ class TaskGenerator:
         # For example:
         # 5-way 1-shot 15-query
         self.mode = config['mode']
-        self.meta_batchsz = config['meta_batchsz']
-        self.spt_num = config['k_shot']
-        self.qry_num = config['k_query']
-        self.img_num = self.spt_num + self.qry_num
-        self.n_way = config['n_way']
-        self.img_size = config['img_size']
-        self.dim_input = np.prod(self.img_size)
-        self.dim_output = config['n_way']
+        if self.mode == 'train':
+            self.meta_batchsz = config['meta_batchsz']
+            self.spt_num = config['k_shot']
+            self.qry_num = config['k_query']
+            self.img_num = self.spt_num + self.qry_num
+            self.n_way = config['n_way']
+            self.img_size = config['img_size']
+            self.dim_input = np.prod(self.img_size)
+            self.dim_output = config['n_way']
+
+        elif self.mode == 'test':
+            self.meta_batchsz = config['meta_batchsz']
+            self.spt_num = config['k_shot']
+            self.qry_num = config['k_query']
+            self.img_num = self.spt_num + self.qry_num
+            self.n_way = config['n_way']
+            self.img_size = config['img_size']
+            self.dim_input = np.prod(self.img_size)
+            self.dim_output = config['n_way']
+            
+        # Set sample folders
         self.metatrain_folders = [os.path.join(META_TRAIN_DIR, label) \
                                     for label in os.listdir(META_TRAIN_DIR) \
                                         if os.path.isdir(os.path.join(META_TRAIN_DIR, label))
@@ -99,6 +112,7 @@ class TaskGenerator:
                                     for label in os.listdir(META_VAL_DIR) \
                                         if os.path.isdir(os.path.join(META_VAL_DIR, label))
                                     ]
+        # Record the relationship between image label and the folder name in each task
         self.label_map = []
     
     def print_label_map(self):
@@ -109,11 +123,14 @@ class TaskGenerator:
                 for i, ref in enumerate(task):
                     path = ref[0]
                     label = path.split('/')[-1]
-                    print ('map {} --> {}'.format(label, ref[1]))
-        print ('========== END ==========')
+                    print ('map {} --> {}\t'.format(label, ref[1]), end='')
+                    if i == 4:
+                        print ('')
+            print ('========== END ==========')
+            self.label_map = []
+        elif len(self.label_map) == 0:
+            print ('ERROR! print_label_map() function must be called after generating a batch dataset')
                     
-
-
     def shuffle_set(self, set_x, set_y):
         # Shuffle
         set_seed = random.randint(0, 100)
@@ -185,15 +202,19 @@ class TaskGenerator:
         :return: a batch of support set tensor and query set tensor
         
         '''
+        folder = []
         if self.mode == 'train':
             folders = self.metatrain_folders
         if self.mode == 'test':
             folders = self.metaval_folders
+        # Shuffle root folder in order to prevent repeat
+        random.shuffle(folder)
         batch_set = []
         # Generate batch dataset
         # batch_spt_set: [meta_batchsz, n_way * k_shot, image_size] & [meta_batchsz, n_way * k_shot, n_way]
         # batch_qry_set: [meta_batchsz, n_way * k_query, image_size] & [meta_batchsz, n_way * k_query, n_way]
         for i in range(self.meta_batchsz):
+            random.shuffle(folders)
             sampled_folders = random.sample(folders, self.n_way)
             random.shuffle(sampled_folders)
             folder_with_label = []
@@ -202,20 +223,8 @@ class TaskGenerator:
                 folder_with_label.append(elem)
             support_x, support_y, query_x, query_y = self.generate_set(folder_with_label)
             batch_set.append((support_x, support_y, query_x, query_y))
+        # return [meta_batchsz * (support_x, support_y, query_x, query_y)]
         return batch_set
-        
-def generate_dataset(train_size=200000, test_size=600, config=None):
-    def _generate_dataset(size):
-        ds = []
-        print ('generating dataset of size {}'.format(size))
-        with tqdm(total = size) as pbar:
-            for i in range(size):
-                ds.append(TaskGenerator(config))
-                if i % 100 == 0 and i > 0:
-                    pbar.set_description('{} dataset generated'.format(i))
-                    pbar.update(100)
-        return ds  
-    return _generate_dataset(train_size), _generate_dataset(test_size)
         
 if __name__ == '__main__':
     train_config = {
@@ -227,8 +236,7 @@ if __name__ == '__main__':
               'img_size':(84, 84, 3),
               'meta_batchsz':4
              }
-    train_ds, test_ds = generate_dataset(train_size=1, test_size=1,config=train_config)
-    batch_set = train_ds[0].batch()
-    support_x, support_y, query_x, query_y = batch_set[0]
-    print (len(batch_set))
-    # print (query_x)
+    train_ds = TaskGenerator(train_config)
+    for i in range(20):
+        train_ds.batch()
+        train_ds.print_label_map()

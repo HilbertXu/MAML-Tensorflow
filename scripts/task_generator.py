@@ -100,6 +100,20 @@ class TaskGenerator:
                                         if os.path.isdir(os.path.join(META_VAL_DIR, label))
                                     ]
         self.label_map = []
+    
+    def print_label_map(self):
+        print ('[TEST] Label map of current Batch')
+        if len(self.label_map) > 0:
+            for i, task in enumerate(self.label_map):
+                print ('========= Task {} =========='.format(i+1))
+                for i, ref in enumerate(task):
+                    path = ref[0]
+                    label = path.split('/')[-1]
+                    print ('map {} --> {}'.format(label, ref[1]))
+        print ('========== END ==========')
+                    
+
+
     def shuffle_set(self, set_x, set_y):
         # Shuffle
         set_seed = random.randint(0, 100)

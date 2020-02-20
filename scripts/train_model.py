@@ -51,9 +51,9 @@ def apply_gradients(optimizer, gradients, variables):
 
 def regular_train_step(input_list):
     model, x, y, optimizer = input_list
-    gradients, loss = compute_gradients(model, x, y)
+    gradients = compute_gradients(model, x, y)
     apply_gradients(optimizer, gradients, model.trainable_variables)
-    return loss
+    return model
 
 def maml_train_step(model, train_ds, epochs=3, inner_lr=0.01, meta_batchsz=4, log_step=1000, config=None):
     if config is not None:
@@ -68,22 +68,76 @@ def maml_train_step(model, train_ds, epochs=3, inner_lr=0.01, meta_batchsz=4, lo
         k_shot = 1
         k_query = 15
         print ('Start training process of {}-way {}-shot {}-query'.format(n_way, k_shot, k_query))
+    
+    # Initialize optimizer
     optimizer = tf.keras.optimizers.Adam()
-
+    # Set up record list
+    query_losses, query_accs = [], []
+    # main loop
     for epoch in range(epochs):
-        print ('[EPOCH. {}]'.format(epoch+1))
+        start = time.time()
+        print ('[EPOCH. {}] Start at {}'.format(epoch+1, start))
         # 200000 steps in total
-        # Using 200000 different task generator to generate batch tasks
+        # Using 200000 different task generator to generate task batches
         # For each batch, containing 4 N-way K-shot tasks
-        # For each task, support set & query set
-        for idx, batch_ds in enumerate(random.sample(train_ds, len(train_ds))):
-            batch_set = batch_ds.batch()
-
-            # update parameters per batch
-            for i in range(len(batch_set)):
-                support_x, support_y, query_x, query_y = batch_set[i]
-                spt_loss = compute_loss(model, support_x, support_y, loss_fn=loss_fn)
-
+        # For each task, containing support set & query set
+        # For support set: k_shot images
+        # For query set: k_query images
+        for i, ds in enumerate(train_ds):
+            if i % 10 == 0 and i > 0:
+                print ('[STEP. {}] current loss: {}, 10 steps for: {} seconds'.format(i, query_losses[-1], time.time()-start))
+                # print (query_losses)
+                start = time.time()
+            batch_sets = ds.batch()
+            # Set the spt_tape to be persistent
+            # cause we use support_x to update the fast weights each task
+            with tf.GradientTape(persistent=True) as spt_tape:  
+                with tf.GradientTape() as query_tape:   
+                    batch_loss = []
+                    batch_acc = []
+                    for i, batch_set in enumerate(batch_sets):
+                        support_x, support_y, query_x, query_y = batch_set
+                        
+                        spt_logits, spt_pred = model.forward(support_x)
+                        spt_loss = loss_fn(support_y, spt_pred)
+                        spt_acc = compute_accuracy(spt_pred, support_y)
+                        spt_grads = spt_tape.gradient(spt_loss, model.trainable_variables)
+                        # copy a same model and apply the support gradients 
+                        # to update the parameters of the copied model
+                        # regrad the parameters of the copied model as the "fast weight" 
+                        # the 'first order gradients'
+                        k = 0
+                        copied_model = copy_model(model, support_x)
+                        for j in range(len(model.layers)):
+                            if 'conv' in model.layers[j].name or 'dense' in model.layers[j].name:
+                                copied_model.layers[j].kernel = tf.subtract(model.layers[j].kernel, tf.multiply(inner_lr, spt_grads[k]))
+                                copied_model.layers[j].bias   = tf.subtract(model.layers[j].bias, tf.multiply(inner_lr, spt_grads[k+1]))
+                                k+=2
+                            if 'batch_normalization' in model.layers[j].name:
+                                copied_model.layers[j].gamma = tf.subtract(model.layers[j].gamma, tf.multiply(inner_lr, spt_grads[k]))
+                                copied_model.layers[j].beta   = tf.subtract(model.layers[j].beta, tf.multiply(inner_lr, spt_grads[k+1]))
+                                k+=2
+                        # use the query set to compute loss of model with fast weights
+                        qry_loss, qry_acc = compute_loss(copied_model, query_x, query_y, loss_fn=loss_fn)
+                        batch_loss.append(qry_loss)
+                        batch_acc.append(qry_acc)
+                        # Record batch outputs
+                        query_losses.append(qry_loss)
+                        query_accs.append(qry_acc)
+                    # Use the mean loss & accuracy of the whole batch
+                    batch_loss = tf.reduce_mean(batch_loss)
+                    batch_acc = tf.reduce_mean(batch_acc)
+                    
+                    # update parameters per batch
+                    # the second order gradients
+                    gradients = query_tape.gradient(batch_loss, model.trainable_variables)
+                    apply_gradients(optimizer, gradients, model.trainable_variables)
+    acc = plt.plot(query_accs)
+    loss = plt.plot(query_losses)
+    plots = [acc, loss]
+    legends = ['Accuracy', 'Loss']
+    plt.legend(plots, legends)
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -102,46 +156,7 @@ if __name__ == '__main__':
               'meta_batchsz':4
              }
     model = MetaLearner()
-    # image = cv2.imread('../test/test.jpg').astype(np.float32)/255
-    # image = tf.convert_to_tensor(image)
-    # image = tf.reshape(image, [-1,84,84,3])
-    # label = [1,0,0,0,0]
-    # label = tf.convert_to_tensor(label)
-    # label = tf.reshape(label, [1, 5])
-    # print (tf.argmax(label, axis=1))
-    # logits, pred = model.forward(image)
-    # print (pred)
-    # print (tf.argmax(pred, axis=1))
-    train_ds, test_ds = generate_dataset(train_size=1, test_size=1,config=train_config)
-    batch_set = train_ds[0].batch()
-    support_x, support_y, query_x, query_y = batch_set[0]
-    loss, acc = compute_loss(model, support_x, support_y, loss_fn=loss_fn)
-    # print (loss)
-    # trainable_variables = model._get_trainable_variables()
-    # print (model.trainable_variables)
-    grads = compute_gradients(model, support_x, support_y, loss_fn=loss_fn)
-    # print (model.trainable_variables)
-    # print (grads)
-    k=0
-    model_copy = copy_model(model, support_x)
-    # train with bn layers
-    for j in range(len(model.layers)):
-        if 'conv' in model.layers[j].name or 'dense' in model.layers[j].name:
-            model_copy.layers[j].kernel = tf.subtract(model.layers[j].kernel, tf.multiply(inner_lr, grads[k]))
-            model_copy.layers[j].bias   = tf.subtract(model.layers[j].bias, tf.multiply(inner_lr, grads[k+1]))
-            k+=2
-        if 'batch_normalization' in model.layers[j].name:
-            print ("Update BN layer")
-            model_copy.layers[j].gamma = tf.subtract(model.layers[j].gamma, tf.multiply(inner_lr, grads[k]))
-            model_copy.layers[j].beta   = tf.subtract(model.layers[j].beta, tf.multiply(inner_lr, grads[k+1]))
-            k+=2
-
-    query_loss, query_acc = compute_loss(model_copy, query_x, query_y)
-    query_grads = compute_gradients(model, query_x, query_y)
-    # apply_gradients(optimizer, )
-
-    # @TODO
-    # Update parameters per batch 
-    # according to maml.py
+    train_ds, test_ds = generate_dataset(train_size=100, test_size=1,config=train_config)
+    maml_train_step(model, train_ds, config=train_config)
     
     

@@ -12,7 +12,7 @@ import numpy as np
 import tensorflow as tf 
 import time
 import matplotlib.pyplot as plt
-from task_generator import generate_dataset, TaskGenerator
+from task_generator import TaskGenerator
 from meta_learner import MetaLearner
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -90,7 +90,9 @@ def maml_train_step(model, train_ds, epochs=1, inner_lr=0.01, meta_batchsz=4, lo
                 # print (query_losses)
                 start = time.time()
             batch_sets = train_ds.batch()
-            train_ds.print_label_map()
+            # Uncomment to see the sampled folders of each task
+            # train_ds.print_label_map()
+
             # Set the spt_tape to be persistent
             # cause we use support_x to update the fast weights each task
             with tf.GradientTape(persistent=True) as spt_tape:  

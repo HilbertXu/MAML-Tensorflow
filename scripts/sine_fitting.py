@@ -365,6 +365,7 @@ def train_maml(model, epochs, dataset, lr_inner=0.01, batch_size=1, log_steps=10
                     k += 2
                 # Step 8
                 test_loss, logits = compute_loss(model_copy, x, y)
+                
             # Step 8
             gradients = test_tape.gradient(test_loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))

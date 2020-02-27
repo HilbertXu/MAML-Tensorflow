@@ -88,6 +88,7 @@ def maml_train(model, train_ds, epochs=1, lr_inner=0.01, batch_size=1, log_steps
                                 tf.multiply(lr_inner, gradients[k+1]))
                     k+=2
                 test_loss, logits = compute_loss(model_copy, x, y)
+            print (model_copy.trainable_variables)
             gradients = test_tape.gradient(test_loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         
@@ -223,8 +224,8 @@ def eval_sinewave_for_test(model, sinusoid_generator=None, num_steps=(0, 1, 10),
 if __name__ == '__main__':
     model = SineModel()
     train_ds, test_ds = generate_dataset(K=10)
-    regular_train(model, train_ds)
-    # model = maml_train(model, train_ds)
+    # regular_train(model, train_ds)
+    model = maml_train(model, train_ds)
     plot_model_comparison_to_average(model, train_ds)
     for index in np.random.randint(0, len(test_ds), size=3):
         eval_sinewave_for_test(model, test_ds[index])

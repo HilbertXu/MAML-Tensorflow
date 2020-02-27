@@ -8,6 +8,7 @@ import os
 import cv2
 import sys
 import random
+import datetime
 import numpy as np
 import tensorflow as tf 
 import time
@@ -18,185 +19,199 @@ from meta_learner import MetaLearner
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 def copy_model(model, x):
+    '''
+    :param model: model to be copied
+    :param x: a set of data, used to build the copied model
+
+    :return copied model
+    '''
     copied_model = MetaLearner()
-    copied_model.forward(x)
+    copied_model(x)
     copied_model.set_weights(model.get_weights())
     return copied_model
 
-def np_to_tensor(list_of_numpy_objs):
-    return (tf.convert_to_tensor(obj) for obj in list_of_numpy_objs)
-
 def loss_fn(y, pred_y):
-    # use softmax_cross_entropy_with_logits as loss function
+    '''
+    :param pred_y: Prediction output of model
+    :param y: Ground truth
+
+    :return loss value:
+    '''
     return tf.reduce_mean(tf.losses.categorical_crossentropy(y, pred_y))
 
-def compute_loss(model, x, y, loss_fn=loss_fn):
-    logits, pred_y = model.forward(x)
-    acc = compute_accuracy(pred_y, y)
-    loss = loss_fn(y, pred_y)
-    return loss, acc
+def accuracy_fn(y, pred_y):
+    '''
+    :param pred_y: Prediction output of model
+    :param y: Ground truth
 
-def compute_accuracy(pred_y, y):
+    :return accuracy value:
+    '''
     accuracy = tf.keras.metrics.Accuracy()
     _ = accuracy.update_state(tf.argmax(pred_y, axis=1), tf.argmax(y, axis=1))
-    return accuracy.result().numpy()
+    return accuracy.result()
+
+def compute_loss(model, x, y, loss_fn=loss_fn):
+    '''
+    :param model: A neural net
+    :param x: Train data
+    :param y: Groud truth
+    :param loss_fn: Loss function used to compute loss value
+
+    :return Loss value
+    '''
+    _, pred_y = model(x)
+    loss = loss_fn(y, pred_y)
+    return loss, pred_y
 
 def compute_gradients(model, x, y, loss_fn=loss_fn):
+    '''
+    :param model: Neural network
+    :param x: Input tensor
+    :param y: Ground truth of input tensor
+    :param loss_fn: loss function
+
+    :return Gradient tensor
+    '''
     with tf.GradientTape() as tape:
-        loss, _ = compute_loss(model, x, y, loss_fn=loss_fn)
-    return tape.gradient(loss, model.trainable_variables)
+        _, pred = model(x)
+        loss = loss_fn(y, pred)
+        grads = tape.gradient(loss, model.trainable_variables)
+    return grads
 
 def apply_gradients(optimizer, gradients, variables):
+    '''
+    :param optimizer: optimizer, Adam for task-level update, SGD for meta level update
+    :param gradients: gradients
+    :param variables: trainable variables of model
+
+    :return None
+    '''
     optimizer.apply_gradients(zip(gradients, variables))
 
 def regular_train_step(model, x, y, optimizer):
-    gradients = compute_gradients(model, x, y)
+    gradients = compute_gradients(model, x, y, loss_fn=loss_fn)
     apply_gradients(optimizer, gradients, model.trainable_variables)
     return model
 
-def maml_train_step(model, train_ds, epochs=1, inner_lr=0.01, meta_batchsz=4, log_step=1000, config=None):
+def maml_train(model, batch_generator, config=None):
     if config is not None:
-        print ('load train config')
+        print ('Loading training configuration')
+        # problem set up
         n_way = config['n_way']
         k_shot = config['k_shot']
         k_query = config['k_query']
+        img_size = config['img_size']
+        # training parameters
         total_steps = config['total_steps']
-        print ('Start training process of {}-way {}-shot {}-query'.format(n_way, k_shot, k_query))
+        print_steps = config['print_steps']
+        epochs = config['epochs']
+        log_steps = config['log_steps']
+        inner_lr = config['inner_lr']
+        meta_lr = config['meta_lr']
+        meta_batchsz = config['meta_batchsz']
+        update_steps = config['update_steps']
+        print ('Start training process of {}-way {}-shot {}-query problem'.format(n_way, k_shot, k_query))
+        print ('{} Epochs, {} steps, inner_lr: {}, meta_lr:{}, meta_batchsz:{}'.format(epochs, total_steps, inner_lr, meta_lr, meta_batchsz))
     else:
         print ('No config input, set to default config')
+        # problem set up
         n_way = 5
         k_shot = 1
         k_query = 15
-        total_steps = 200000
+        img_size = [84, 84, 3]
+        # training parameters
+        total_steps = 10000
+        print_steps = 500.0
+        epochs = 3
+        log_steps = 1000
+        inner_lr = 0.01
+        meta_lr = 1e-3
+        meta_batchsz = 4
+        update_steps = 5
         print ('Start training process of {}-way {}-shot {}-query'.format(n_way, k_shot, k_query))
-    
-    # Initialize optimizer
-    optimizer = tf.keras.optimizers.Adam()
-    # Set up record list
+    # Initialize Tensorboard writer
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_dir = '../logs/' + current_time
+    summary_writer = tf.summary.create_file_writer(log_dir)
+
+    # Initialize Optimizer
+    # Meta optimizer for update model parameters
+    meta_optimizer = tf.keras.optimizers.Adam(learning_rate=meta_lr, name='meta_optimizer')
+    # Manually apply Gradient descent as the task-level optimizer
+    # According to MetaLearner.update_fast_weights
+    # Initialize Checkpoint handle
+    checkpoint = tf.train.Checkpoint(maml_model=model)
+    # Set up train record
     query_losses, query_accs = [], []
-    # main loop
+
+    # Define the maml train step
+    def maml_train_step(batch_set):
+        # Set up recorders for every batch
+        batch_loss = [0 for _ in range(meta_batchsz)]
+        batch_acc = [0 for _ in range(meta_batchsz)]
+        # Set up outer gradient tape, only watch model.trainable_variables
+        # Because GradientTape only auto record tranable_variables of model
+        # But the copied_model.inner_weights is tf.Tensor, so they won't be automatically watched
+        with tf.GradientTape() as outer_tape:
+            # Set up copied model
+            copied_model = model
+            # Use the average loss over all tasks in one batch to compute gradients
+            for idx, task in enumerate(batch_set):
+                # Slice task to support set and query set
+                support_x, support_y, query_x, query_y = task
+                # Update fast weights several times
+                for i in range(update_steps):
+                    # Set up inner gradient tape, watch the copied_model.inner_weights
+                    with tf.GradientTape(watch_accessed_variables=False) as inner_tape:
+                        # we only want inner tape watch the fast weights in each update steps
+                        inner_tape.watch(copied_model.inner_weights)
+                        inner_loss, _ = compute_loss(copied_model, support_x, support_y)
+                    inner_grads = inner_tape.gradient(inner_loss, copied_model.inner_weights)
+                    copied_model = MetaLearner.meta_update(copied_model, alpha=inner_lr, grads=inner_grads)
+                # Compute task loss & accuracy on the query set
+                task_loss, task_pred = compute_loss(copied_model, query_x, query_y, loss_fn=loss_fn)
+                task_acc = accuracy_fn(query_y, task_pred)
+                batch_loss[idx] += task_loss
+                batch_acc[idx] += task_acc
+            print (batch_loss, batch_acc)
+            # Compute mean loss of the whole batch
+            mean_loss = tf.reduce_mean(batch_loss)
+        # Compute second order gradients
+        outer_grads = outer_tape.gradient(mean_loss, model.inner_weights)
+        apply_gradients(meta_optimizer, outer_grads, model.inner_weights)
+        # Return reslut of one maml train step
+        return batch_loss, batch_acc
+            
+    # Main loop
     for epoch in range(epochs):
-        start = time.time()
+        start = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         print ('[EPOCH. {}] Start at {}'.format(epoch+1, start))
-        # 200000 steps in total
-        # Using 200000 different task generator to generate task batches
-        # For each batch, containing 4 N-way K-shot tasks
-        # For each task, containing support set & query set
-        # For support set: k_shot images
-        # For query set: k_query images
-        for i in range(total_steps):
-            if i % 10 == 0 and i > 0:
-                print ('[STEP. {}] current loss: {}, current_acc: {}, Time to run 10 steps: {}'.format(i, query_losses[-1], query_accs[-1],time.time()-start))
-                # print (query_losses)
-                start = time.time()
-            batch_sets = train_ds.batch()
-            # Uncomment to see the sampled folders of each task
-            # train_ds.print_label_map()
-
-            # Set the spt_tape to be persistent
-            # cause we use support_x to update the fast weights each task
-            with tf.GradientTape(persistent=True) as spt_tape:  
-                with tf.GradientTape() as query_tape:   
-                    batch_loss = []
-                    batch_acc = []
-                    for i, batch_set in enumerate(batch_sets):
-                        support_x, support_y, query_x, query_y = batch_set
-                        
-                        spt_logits, spt_pred = model.forward(support_x)
-                        spt_loss = loss_fn(support_y, spt_pred)
-                        spt_acc = compute_accuracy(spt_pred, support_y)
-                        spt_grads = spt_tape.gradient(spt_loss, model.trainable_variables)
-                        # copy a same model and apply the support gradients 
-                        # to update the parameters of the copied model
-                        # regrad the parameters of the copied model as the "fast weight" 
-                        # the 'first order gradients'
-                        k = 0
-                        copied_model = copy_model(model, support_x)
-                        for j in range(len(model.layers)):
-                            if 'conv' in model.layers[j].name or 'dense' in model.layers[j].name:
-                                copied_model.layers[j].kernel = tf.subtract(model.layers[j].kernel, tf.multiply(inner_lr, spt_grads[k]))
-                                copied_model.layers[j].bias   = tf.subtract(model.layers[j].bias, tf.multiply(inner_lr, spt_grads[k+1]))
-                                k+=2
-                            if 'batch_normalization' in model.layers[j].name:
-                                copied_model.layers[j].gamma = tf.subtract(model.layers[j].gamma, tf.multiply(inner_lr, spt_grads[k]))
-                                copied_model.layers[j].beta   = tf.subtract(model.layers[j].beta, tf.multiply(inner_lr, spt_grads[k+1]))
-                                k+=2
-                        # use the query set to compute loss of model with fast weights
-                        qry_loss, qry_acc = compute_loss(copied_model, query_x, query_y, loss_fn=loss_fn)
-                        batch_loss.append(qry_loss)
-                        batch_acc.append(qry_acc)
-                        # Record batch outputs
-                        query_losses.append(qry_loss)
-                        query_accs.append(qry_acc)
-                    # Use the mean loss & accuracy of the whole batch
-                    batch_loss = tf.reduce_mean(batch_loss)
-                    batch_acc = tf.reduce_mean(batch_acc)
-                    
-                    # update parameters per batch
-                    # the second order gradients
-                    gradients = query_tape.gradient(batch_loss, model.trainable_variables)
-                    apply_gradients(optimizer, gradients, model.trainable_variables)
-    # visulize training process
-    acc = plt.plot(query_accs)
-    loss = plt.plot(query_losses)
-    plots = [acc, loss]
-    legends = ['Accuracy', 'Loss']
-    plt.legend(plots, legends)
-    plt.show()
+        # Get a batch data
+        batch_set = batch_generator.batch()
+        # For each epoch update model total_steps times
+        for step in range(total_steps):
+            # Run maml train step
+            print ('[STEP. {}]'.format(step))
+            batch_loss, batch_acc = maml_train_step(batch_set)
+            # Print train result
+            if step % print_steps == 0 and step > 0:
+                batch_loss = [loss.numpy() for loss in batch_loss]
+                batch_acc = [acc.numpy() for acc in batch_acc]
+                print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}'.format(step, batch_loss, batch_acc))
+                # Uncomment to see the sampled folders of each task
+                # train_ds.print_label_map()
+            # Save checkpoint
+            if step % log_steps == 0 and step > 0:
+                checkpoint.save('../weights/maml_model.ckpt')
+    
     return model
-
-def eval_model_test(model, test_ds=None, lr=0.01, test_config=None):
-    if test_ds is None and test_config is not None:
-        test_ds = TaskGenerator(test_config)
-    else:
-        test_config = {
-              'mode':'test',
-              'dataset':'miniimagenet',
-              'n_way':5, 
-              'k_shot':1,
-              'k_query':15, 
-              'meta_batchsz':1,
-              'num_steps':(0, 1, 10)
-        }
-    optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
-    test_ds = TaskGenerator(config=test_config)
-    # in test mode, task generator return a batch dataset containing only one new task
-    batch_set = test_ds.batch()[0]
-    # test_ds.print_label_map()
-
-    def _eval_model_test(batch_set):
-        loss_result = []
-        acc_result = []
-        support_x, support_y, query_x, query_y = batch_set
-        # use one task to finetune the trained net
-        num_steps = test_config['num_steps']
-        # Test process
-        for step in range(np.max(num_steps)):
-            if step == 0:
-                # Record the initial accuracy and loss
-                spt_loss, spt_acc = compute_loss(model, support_x, support_y)
-                loss_result.append((0, spt_loss))
-                acc_result.append((0, spt_acc))
-            regular_train_step(model, query_x, query_y, optimizer)
-            if step != 0 and step in num_steps:
-                spt_loss, spt_acc = compute_loss(model, support_x, support_y)
-                loss_result.append((step, spt_loss))
-                acc_result.append((step,spt_acc))
-        result = [loss_result, acc_result]
-        return result
-    test_loss, test_acc = _eval_model_test(batch_set)
-    plots = [plt.plot(test_loss), plt.plot(test_acc)]
-    legends = ['test loss', 'test accuracy']
-    plt.plot(plots, legends)
-    plt.show()
-
 
 if __name__ == '__main__':
     n_way = 5
     k_shot = 1
     meta_batchsz=4
     inner_lr = 0.001
-	
+    
     train_config = {
               'mode':'train',
               'dataset':'miniimagenet',
@@ -204,8 +219,14 @@ if __name__ == '__main__':
               'k_shot':1,
               'k_query':15, 
               'img_size':[84, 84, 3],
+              'inner_lr':0.01,
+              'meta_lr':1e-3,
               'meta_batchsz':4,
-              'total_steps':200000
+              'update_steps': 5,
+              'total_steps':100,
+              'log_steps':20,
+              'print_steps':5,
+              'epochs':3
              }
     test_config = {
               'mode':'test',
@@ -215,11 +236,17 @@ if __name__ == '__main__':
               'k_query':15, 
               'meta_batchsz':4,
               'img_size':[84, 84, 3],
-              'num_steps':(0, 1, 10)
+              'num_steps':(0, 1, 5, 10, 15, 20, 40, 80, 100)
              }
+    print ('Initialize model')
     model = MetaLearner()
-    train_ds = TaskGenerator(train_config)
-    model = maml_train_step(model, train_ds, config=train_config)
-    eval_model_test(model, test_config=test_config)
+    model = MetaLearner.initialize(model)
+
+    batch_generator = TaskGenerator(train_config)
+    maml_train(model, batch_generator, train_config)
     
+
     
+
+
+   

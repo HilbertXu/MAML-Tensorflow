@@ -71,7 +71,7 @@ class ImageProc:
                             pbar.update(500)
         
 class TaskGenerator:
-    def __init__(self, config):
+    def __init__(self, args):
         '''
         :param mode: train or test
         :param n_way: a train task contains images from different N classes
@@ -82,26 +82,25 @@ class TaskGenerator:
         '''
         # For example:
         # 5-way 1-shot 15-query
-        self.mode = config['mode']
-        if self.mode == 'train':
-            self.meta_batchsz = config['meta_batchsz']
-            self.spt_num = config['k_shot']
-            self.qry_num = config['k_query']
-            self.img_num = self.spt_num + self.qry_num
-            self.n_way = config['n_way']
-            self.img_size = config['img_size']
-            self.dim_input = np.prod(self.img_size)
-            self.dim_output = config['n_way']
-
-        elif self.mode == 'test':
-            self.meta_batchsz = config['meta_batchsz']
-            self.spt_num = config['k_shot']
-            self.qry_num = config['k_query']
-            self.img_num = self.spt_num + self.qry_num
-            self.n_way = config['n_way']
-            self.img_size = config['img_size']
-            self.dim_input = np.prod(self.img_size)
-            self.dim_output = config['n_way']
+        if args.dataset == 'miniimagenet':
+            self.mode = args.mode
+            self.meta_batchsz = args.meta_batchsz
+            self.n_way = args.n_way
+            self.spt_num = args.k_shot
+            self.qry_num = args.k_query
+            self.img_size = args.img_size
+            self.img_channel = args.img_channel
+            self.dim_output = self.n_way
+        
+        if args.dataset == 'ominiglot':
+            self.mode = args.mode
+            self.meta_batchsz = args.meta_batchsz
+            self.n_way = args.n_way
+            self.spt_num = args.k_shot
+            self.qry_num = args.k_query
+            self.img_size = args.img_size
+            self.img_channel = args.img_channel
+            self.dim_output = self.n_way
             
         # Set sample folders
         self.metatrain_folders = [os.path.join(META_TRAIN_DIR, label) \
@@ -141,7 +140,7 @@ class TaskGenerator:
         return set_x, set_y
 
     def read_images(self, image_file):
-        return np.reshape(cv2.imread(image_file).astype(np.float32)/255, self.img_size)
+        return np.reshape(cv2.imread(image_file).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel))
     
     def convert_to_tensor(self, np_objects):
         return [tf.convert_to_tensor(obj) for obj in np_objects]
@@ -225,18 +224,3 @@ class TaskGenerator:
             batch_set.append((support_x, support_y, query_x, query_y))
         # return [meta_batchsz * (support_x, support_y, query_x, query_y)]
         return batch_set
-        
-if __name__ == '__main__':
-    train_config = {
-              'mode':'train',
-              'dataset':'miniimagenet',
-              'n_way':5, 
-              'k_shot':1,
-              'k_query':15, 
-              'img_size':(84, 84, 3),
-              'meta_batchsz':4
-             }
-    train_ds = TaskGenerator(train_config)
-    for i in range(20):
-        train_ds.batch()
-        train_ds.print_label_map()

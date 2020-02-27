@@ -28,7 +28,7 @@ class MetaLearner(tf.keras.models.Model):
     """
     Meta Learner
     """
-    def __init__(self):
+    def __init__(self, args=None):
         """
         :param filters: Number of filters in conv layers
         :param img_size: Size of input image, [84, 84, 3] for miniimagenet
@@ -38,25 +38,31 @@ class MetaLearner(tf.keras.models.Model):
         super(MetaLearner, self).__init__()
         # for miniimagener dataset set conv2d kernel size=[32, 3, 3]
         # for ominiglot dataset set conv2d kernel size=[64, 3, 3]
-        self.filters     = 32
-        self.img_size    = [84, 84, 3]
-        self.op_channel  = 5
-        self.training    = True
+        if args is not None:
+            self.filters = args.num_filters
+            self.ip_size = (1, args.img_size, args.img_size, args.img_channel)
+            self.op_channel = args.n_way
+            self.training = True
+        else:
+            self.filters     = 32
+            self.ip_size    = (1, 84, 84, 3)
+            self.op_channel  = 5
+            self.training    = True
 
         # Build model layers
-        self.conv_1 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.conv_1 = tf.keras.layers.Conv2D(filters=self.filters, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
         self.bn_1 = tf.keras.layers.BatchNormalization(axis=-1)
         self.max_pool_1 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
 
-        self.conv_2 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.conv_2 = tf.keras.layers.Conv2D(filters=self.filters, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
         self.bn_2 = tf.keras.layers.BatchNormalization(axis=-1)
         self.max_pool_2 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
 
-        self.conv_3 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.conv_3 = tf.keras.layers.Conv2D(filters=self.filters, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
         self.bn_3 = tf.keras.layers.BatchNormalization(axis=-1)
         self.max_pool_3 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
 
-        self.conv_4 = tf.keras.layers.Conv2D(filters=32, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
+        self.conv_4 = tf.keras.layers.Conv2D(filters=self.filters, kernel_size=(3,3), strides=(1,1), padding='SAME', kernel_initializer='glorot_normal')
         self.bn_4 = tf.keras.layers.BatchNormalization(axis=-1)
         self.max_pool_4 = tf.keras.layers.MaxPool2D(pool_size=(2,2))
 
@@ -139,6 +145,7 @@ class MetaLearner(tf.keras.models.Model):
         copied_model.out.bias = model.out.bias
 
         # if call with gradients, apply it by using SGD
+        # Manually apply Gradient descent as the task-level optimizer
         if grads is not None:
             copied_model.conv_1.kernel = copied_model.conv_1.kernel - alpha * grads[0]
             copied_model.conv_1.bias = copied_model.conv_1.bias - alpha * grads[1]

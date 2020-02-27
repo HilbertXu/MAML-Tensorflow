@@ -10,6 +10,7 @@ import sys
 import random
 import datetime
 import numpy as np
+import argparse
 import tensorflow as tf 
 import time
 import matplotlib.pyplot as plt
@@ -93,57 +94,29 @@ def regular_train_step(model, x, y, optimizer):
     apply_gradients(optimizer, gradients, model.trainable_variables)
     return model
 
-def maml_train(model, batch_generator, config=None):
-    if config is not None:
-        print ('Loading training configuration')
-        # problem set up
-        n_way = config['n_way']
-        k_shot = config['k_shot']
-        k_query = config['k_query']
-        img_size = config['img_size']
-        # training parameters
-        total_steps = config['total_steps']
-        print_steps = config['print_steps']
-        epochs = config['epochs']
-        log_steps = config['log_steps']
-        inner_lr = config['inner_lr']
-        meta_lr = config['meta_lr']
-        meta_batchsz = config['meta_batchsz']
-        update_steps = config['update_steps']
-        print ('Start training process of {}-way {}-shot {}-query problem'.format(n_way, k_shot, k_query))
-        print ('{} Epochs, {} steps, inner_lr: {}, meta_lr:{}, meta_batchsz:{}'.format(epochs, total_steps, inner_lr, meta_lr, meta_batchsz))
-    else:
-        print ('No config input, set to default config')
-        # problem set up
-        n_way = 5
-        k_shot = 1
-        k_query = 15
-        img_size = [84, 84, 3]
-        # training parameters
-        total_steps = 10000
-        print_steps = 500.0
-        epochs = 3
-        log_steps = 1000
-        inner_lr = 0.01
-        meta_lr = 1e-3
-        meta_batchsz = 4
-        update_steps = 5
-        print ('Start training process of {}-way {}-shot {}-query'.format(n_way, k_shot, k_query))
+def maml_train(model, batch_generator):
+    total_steps = args.total_steps
+    meta_batchsz = args.meta_batchsz
+    update_steps = args.update_steps
+    ckpt_steps = args.ckpt_steps
+    print_steps = args.print_steps
+    inner_lr = args.inner_lr
+    meta_lr = args.meta_lr
+    ckpt_dir = args.ckpt_dir
+    print ('Start training process of {}-way {}-shot {}-query problem'.format(args.n_way, args.k_shot, args.k_query))
+    print ('{} steps, inner_lr: {}, meta_lr:{}, meta_batchsz:{}'.format(total_steps, inner_lr, meta_lr, meta_batchsz))
+
     # Initialize Tensorboard writer
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = '../logs/' + current_time
+    log_dir = args.log_dir + current_time
     summary_writer = tf.summary.create_file_writer(log_dir)
 
-    # Initialize Optimizer
     # Meta optimizer for update model parameters
-    meta_optimizer = tf.keras.optimizers.Adam(learning_rate=meta_lr, name='meta_optimizer')
-    # Manually apply Gradient descent as the task-level optimizer
-    # According to MetaLearner.update_fast_weights
+    meta_optimizer = tf.keras.optimizers.Adam(learning_rate=args.meta_lr, name='meta_optimizer')
+    
     # Initialize Checkpoint handle
     checkpoint = tf.train.Checkpoint(maml_model=model)
-    # Set up train record
-    query_losses, query_accs = [], []
-
+    
     # Define the maml train step
     def maml_train_step(batch_set):
         # Set up recorders for every batch
@@ -173,7 +146,6 @@ def maml_train(model, batch_generator, config=None):
                 task_acc = accuracy_fn(query_y, task_pred)
                 batch_loss[idx] += task_loss
                 batch_acc[idx] += task_acc
-            print (batch_loss, batch_acc)
             # Compute mean loss of the whole batch
             mean_loss = tf.reduce_mean(batch_loss)
         # Compute second order gradients
@@ -183,67 +155,109 @@ def maml_train(model, batch_generator, config=None):
         return batch_loss, batch_acc
             
     # Main loop
-    for epoch in range(epochs):
-        start = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        print ('[EPOCH. {}] Start at {}'.format(epoch+1, start))
-        # Get a batch data
-        batch_set = batch_generator.batch()
-        # For each epoch update model total_steps times
-        for step in range(total_steps):
-            # Run maml train step
-            print ('[STEP. {}]'.format(step))
-            batch_loss, batch_acc = maml_train_step(batch_set)
-            # Print train result
-            if step % print_steps == 0 and step > 0:
-                batch_loss = [loss.numpy() for loss in batch_loss]
-                batch_acc = [acc.numpy() for acc in batch_acc]
-                print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}'.format(step, batch_loss, batch_acc))
-                # Uncomment to see the sampled folders of each task
-                # train_ds.print_label_map()
-            # Save checkpoint
-            if step % log_steps == 0 and step > 0:
-                checkpoint.save('../weights/maml_model.ckpt')
+    start = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    print ('Start at {}'.format(start))
+    # Get a batch data
+    batch_set = batch_generator.batch()
+    # For each epoch update model total_steps times
+    for step in range(total_steps):
+        # Run maml train step
+        batch_loss, batch_acc = maml_train_step(batch_set)
+        # Write to Tensorboard
+        with summary_writer.as_default():
+            tf.summary.scalar('query loss', tf.reduce_mean(batch_loss), step=step)
+            tf.summary.scalar('query accuracy', tf.reduce_mean(batch_acc), step=step)
+        # Print train result
+        if step % print_steps == 0 and step > 0:
+            batch_loss = [loss.numpy() for loss in batch_loss]
+            batch_acc = [acc.numpy() for acc in batch_acc]
+            print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}'.format(step, batch_loss, batch_acc))
+            # Uncomment to see the sampled folders of each task
+            # train_ds.print_label_map()
+        # Save checkpoint
+        if step % ckpt_steps == 0 and step > 0:
+            checkpoint.save(ckpt_dir+'maml_model.ckpt')
     
     return model
 
-if __name__ == '__main__':
-    n_way = 5
-    k_shot = 1
-    meta_batchsz=4
-    inner_lr = 0.001
+def eval_model(model, batch_generator):
+    # Generate a batch data
+    batch_set = batch_generator.batch()
+    # Print the label map of each task
+    batch_generator.print_label_map()
+    # Use a copy of current model
+    copied_model = model
+    # Initialize optimizer
+    optimizer = tf.keras.optimizers.SGD(learning_rate=args.inner_lr)
+
+    num_steps = (0, 1, 10, 100)
+    task_losses = [0, 0, 0, 0]
+    task_accs = [0, 0, 0, 0]
     
-    train_config = {
-              'mode':'train',
-              'dataset':'miniimagenet',
-              'n_way':5, 
-              'k_shot':1,
-              'k_query':15, 
-              'img_size':[84, 84, 3],
-              'inner_lr':0.01,
-              'meta_lr':1e-3,
-              'meta_batchsz':4,
-              'update_steps': 5,
-              'total_steps':100,
-              'log_steps':20,
-              'print_steps':5,
-              'epochs':3
-             }
-    test_config = {
-              'mode':'test',
-              'dataset':'miniimagenet',
-              'n_way':5, 
-              'k_shot':1,
-              'k_query':15, 
-              'meta_batchsz':4,
-              'img_size':[84, 84, 3],
-              'num_steps':(0, 1, 5, 10, 15, 20, 40, 80, 100)
-             }
+    # Record test result
+    if 0 in num_steps:
+        for idx, task in enumerate(batch_set):
+            support_x, support_y, query_x, query_y = task
+            loss, pred = compute_loss(model, query_x, query_y)
+            acc = accuracy_fn(query_y, pred)
+            task_losses[idx] += loss.numpy()
+            task_accs[idx] += acc.numpy()
+        print ('Before any update steps, test result:')
+        print ('Task losses: {}'.format(task_losses))
+        print ('Task accuracies: {}'.format(task_accs))
+
+    task_losses = [0, 0, 0, 0]
+    task_accs = [0, 0, 0, 0]
+    # Test for each task
+    for idx, task in enumerate(batch_set):
+        print ('========== Task {} =========='.format(idx+1))
+        support_x, support_y, query_x, query_y = task
+        for step in range(1, np.max(num_steps)+1):
+            regular_train_step(model, support_x, support_y, optimizer)
+            loss, pred = compute_loss(model, query_x, query_y)
+            acc = accuracy_fn(query_y, pred)
+            # Record result
+            if step in num_steps:
+                print ('After {} steps update'.format(step))
+                print ('Task losses: {}'.format(loss.numpy()))
+                print ('Task accs: {}'.format(acc.numpy()))
+                print ('---------------------------------')
+
+
+if __name__ == '__main__':
+    argparse = argparse.ArgumentParser()
+    argparse.add_argument('--mode', type=str, help='train or test', default='train')
+    # Dataset options
+    argparse.add_argument('--dataset', type=str, help='Dataset used to train model', default='miniimagenet')
+    # Task options
+    argparse.add_argument('--n_way', type=int, help='Number of classes used in classification (e.g. 5-way classification)', default=5)
+    argparse.add_argument('--k_shot', type=int, help='Number of images in support set', default=1)
+    argparse.add_argument('--k_query', type=int, help='Number of images in query set', default=15)
+    # Model options
+    argparse.add_argument('--img_size', type=int, help='The size of images input neural net (84 for MiniImagenet, 28 for Ominiglot)', default=84)
+    argparse.add_argument('--img_channel', type=int, help='Number of channels of input images (3 for MiniImagenet, 1 for Ominiglot)', default=3)
+    argparse.add_argument('--num_filters', type=int, help='Number of filters in the convolution layers (32 for MiniImagenet, 64 for Ominiglot)', default=32)
+    # Training options
+    argparse.add_argument('--meta_batchsz', type=int, help='Number of tasks in one batch', default=4)
+    argparse.add_argument('--update_steps', type=int, help='Number of inner gradient updates for each task', default=1)
+    argparse.add_argument('--inner_lr', type=float, help='Learning rate of inner update steps, the step size alpha in the algorithm', default=1e-2) # 0.1 for ominiglot
+    argparse.add_argument('--meta_lr', type=float, help='Learning rate of meta update steps, the step size beta in the algorithm', default=1e-3)
+    argparse.add_argument('--total_steps', type=int, help='Total update steps for each epoch', default=50)
+    # Log options
+    argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=10)
+    argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=5)
+    argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../logs/')
+    argparse.add_argument('--ckpt_dir', type=str, help='Path to the checkpoint directory', default='../weights/')
+    # Generate args
+    args = argparse.parse_args()
+    
     print ('Initialize model')
-    model = MetaLearner()
+    model = MetaLearner(args=args)
     model = MetaLearner.initialize(model)
 
-    batch_generator = TaskGenerator(train_config)
-    maml_train(model, batch_generator, train_config)
+    batch_generator = TaskGenerator(args)
+    model = maml_train(model, batch_generator)
+    eval_model(model, batch_generator)
     
 
     

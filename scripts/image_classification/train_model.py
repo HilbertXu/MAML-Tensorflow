@@ -237,6 +237,7 @@ if __name__ == '__main__':
     argparse.add_argument('--img_size', type=int, help='The size of images input neural net (84 for MiniImagenet, 28 for Ominiglot)', default=84)
     argparse.add_argument('--img_channel', type=int, help='Number of channels of input images (3 for MiniImagenet, 1 for Ominiglot)', default=3)
     argparse.add_argument('--num_filters', type=int, help='Number of filters in the convolution layers (32 for MiniImagenet, 64 for Ominiglot)', default=32)
+    argparse.add_argument('--with_bn', type=bool, help='Turn True to add BatchNormalization layers in neural net', default=False)
     # Training options
     argparse.add_argument('--meta_batchsz', type=int, help='Number of tasks in one batch', default=4)
     argparse.add_argument('--update_steps', type=int, help='Number of inner gradient updates for each task', default=1)
@@ -246,14 +247,15 @@ if __name__ == '__main__':
     # Log options
     argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=10)
     argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=5)
-    argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../logs/')
-    argparse.add_argument('--ckpt_dir', type=str, help='Path to the checkpoint directory', default='../weights/')
+    argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../../logs/')
+    argparse.add_argument('--ckpt_dir', type=str, help='Path to the checkpoint directory', default='../../weights/')
     # Generate args
     args = argparse.parse_args()
     
     print ('Initialize model')
     model = MetaLearner(args=args)
     model = MetaLearner.initialize(model)
+    model.summary()
 
     batch_generator = TaskGenerator(args)
     model = maml_train(model, batch_generator)

@@ -21,8 +21,8 @@ from PIL import Image
 import tensorflow as tf
 import cv2
 
-META_TRAIN_DIR = '../dataset/miniImagenet/train'
-META_VAL_DIR = '../dataset/miniImagenet/test'
+META_TRAIN_DIR = '../../dataset/miniImagenet/train'
+META_VAL_DIR = '../../dataset/miniImagenet/test'
 
 
 class ImageProc:

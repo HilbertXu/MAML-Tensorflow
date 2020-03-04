@@ -61,7 +61,7 @@ def regular_train(model, train_ds, epochs=1, lr=0.001, log_steps=1000):
                     i, curr_loss, log_steps, time.time() - start))
                 start = time.time()
         plt.plot(losses)
-        plt.title('Loss Vs Time steps')
+        plt.title('SGD Loss Vs Time steps with respect to 10 points')
         plt.show()
     return model
 
@@ -88,7 +88,6 @@ def maml_train(model, train_ds, epochs=1, lr_inner=0.01, batch_size=1, log_steps
                                 tf.multiply(lr_inner, gradients[k+1]))
                     k+=2
                 test_loss, logits = compute_loss(model_copy, x, y)
-            print (model_copy.trainable_variables)
             gradients = test_tape.gradient(test_loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         
@@ -101,6 +100,7 @@ def maml_train(model, train_ds, epochs=1, lr_inner=0.01, batch_size=1, log_steps
                 print('Step {}: loss = {}, Time to run {} steps = {}'.format(i, loss, log_steps, time.time() - start))
                 start = time.time()
         plt.plot(losses)
+        plt.title('MAML Loss Vs Time steps with respect to 10 points')
         plt.show()
     return model
 
@@ -128,6 +128,7 @@ def plot_model_comparison_to_average(model, ds, model_name='neural network', K=1
     
     # plot
     plt.legend([avg_plot, model_plot], ['Average', model_name])
+    plt.title('Model Prediction compared to the mean of training sine waves actual Y')
     plt.show()
                 
 
@@ -166,7 +167,7 @@ def eval_sine_test(model, optimizer, x, y, x_test, y_test, num_steps=(0, 1, 10))
     return fit_res
 
 
-def eval_sinewave_for_test(model, sinusoid_generator=None, num_steps=(0, 1, 10), lr=0.01, plot=True):
+def eval_sinewave_for_test(model, sinusoid_generator=None, num_steps=(0, 1, 10), lr=0.01, plot=True, name=None):
     '''Evaluates how the sinewave addapts at dataset.
     
     The idea is to use the pretrained model as a weight initializer and
@@ -215,17 +216,69 @@ def eval_sinewave_for_test(model, sinusoid_generator=None, num_steps=(0, 1, 10),
     plt.legend(plots, legend)
     plt.ylim(-5, 5)
     plt.xlim(-6, 6)
+    plt.title(name)
     if plot:
         plt.show()
     
     return fit_res
 
+def compare_maml_and_neural_net(maml, neural_net, sinusoid_generator, num_steps=list(range(10)),
+                                intermediate_plot=True, marker='x', linestyle='--',figure_name=None):
+    '''Compare the loss of a MAML model and a neural net.
+    
+    Fits the models for a new task (new sine wave) and then plot
+    the loss of both models along `num_steps` interactions.
+    
+    Args:
+        maml: An already trained MAML.
+        neural_net: An already trained neural net.
+        num_steps: Number of steps to be logged.
+        intermediate_plot: If True plots intermediate plots from
+            `eval_sinewave_for_test`.
+        marker: Marker used for plotting.
+        linestyle: Line style used for plotting.
+    '''
+    if intermediate_plot:
+        print('MAML')
+    fit_maml = eval_sinewave_for_test(maml, sinusoid_generator, plot=intermediate_plot,name=figure_name)
+    if intermediate_plot:
+        print('Neural Net')
+    fit_neural_net = eval_sinewave_for_test(neural_net, sinusoid_generator, plot=intermediate_plot,name=figure_name)
+    
+    fit_res = {'MAML': fit_maml, 'Neural Net': fit_neural_net}
+    
+    legend = []
+    for name in fit_res:
+        x = []
+        y = []
+        for n, _, loss in fit_res[name]:
+            x.append(n)
+            y.append(loss)
+        plt.plot(x, y, marker=marker, linestyle=linestyle)
+        plt.xticks(num_steps)
+        legend.append(name)
+    plt.title('Loss vs FineTune steps with respect to 10 points')
+    plt.legend(legend)
+    plt.show()
+
 
 if __name__ == '__main__':
     model = SineModel()
     train_ds, test_ds = generate_dataset(K=10)
-    # regular_train(model, train_ds)
-    model = maml_train(model, train_ds)
-    plot_model_comparison_to_average(model, train_ds)
+    name = 'Pre-trained Model K=10 lr=0.001'
+    neural_model = regular_train(model, train_ds)
+    plot_model_comparison_to_average(neural_model, train_ds)
     for index in np.random.randint(0, len(test_ds), size=3):
-        eval_sinewave_for_test(model, test_ds[index])
+        eval_sinewave_for_test(neural_model, test_ds[index],name=name)
+
+
+    model = SineModel()
+    name = 'MAML Model K=10, Alpha=0.01 Beta=0.001'
+    maml_model = maml_train(model, train_ds)
+    plot_model_comparison_to_average(maml_model, train_ds)
+    for index in np.random.randint(0, len(test_ds), size=3):
+        eval_sinewave_for_test(maml_model, test_ds[index],name=name)
+
+    for _ in range(3):
+        index = np.random.choice(range(len(test_ds)))
+        compare_maml_and_neural_net(maml_model, neural_model, test_ds[index])

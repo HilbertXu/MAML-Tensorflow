@@ -9,3 +9,5 @@
 /test
 /old
 /weights
+scripts/sine_fitting/__pycache__/
+scripts/image_classification/__pycache__/

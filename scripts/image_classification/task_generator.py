@@ -205,6 +205,7 @@ class TaskGenerator:
         if self.mode == 'train':
             folders = self.metatrain_folders
         if self.mode == 'test':
+            print ('sample from test folders')
             folders = self.metaval_folders
         # Shuffle root folder in order to prevent repeat
         random.shuffle(folder)

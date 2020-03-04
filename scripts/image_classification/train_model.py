@@ -19,6 +19,20 @@ from meta_learner import MetaLearner
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+def restore_model(model, weights_dir):
+    '''
+    :param model: Model to be restored
+    :param weights_dir: Path to weights
+
+    :return: model with trained weights
+    '''
+    ckpt = tf.train.Checkpoint(maml_model=model)
+    latest_weights = tf.train.latest_checkpoint(weights_dir)
+    ckpt.restore(latest_weights)
+    return model
+    
+
+
 def copy_model(model, x):
     '''
     :param model: model to be copied
@@ -158,9 +172,11 @@ def maml_train(model, batch_generator):
     start = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     print ('Start at {}'.format(start))
     # Get a batch data
-    batch_set = batch_generator.batch()
+    
     # For each epoch update model total_steps times
     for step in range(total_steps):
+        # Generate batch data
+        batch_set = batch_generator.batch()
         # Run maml train step
         batch_loss, batch_acc = maml_train_step(batch_set)
         # Write to Tensorboard
@@ -255,11 +271,18 @@ if __name__ == '__main__':
     print ('Initialize model')
     model = MetaLearner(args=args)
     model = MetaLearner.initialize(model)
+    # model = restore_model(model, '../../weights')
     model.summary()
 
     batch_generator = TaskGenerator(args)
     model = maml_train(model, batch_generator)
-    eval_model(model, batch_generator)
+    # print ("Restore weights")
+    # batch_generator = TaskGenerator(args)
+    # batch_generator.mode = 'test'
+    # model = MetaLearner(args=args)
+    
+    # eval_model(model, batch_generator)
+
     
 
     

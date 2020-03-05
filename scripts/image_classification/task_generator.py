@@ -9,6 +9,7 @@
 '''
 
 from __future__ import print_function
+import argparse
 import csv
 import glob
 import os
@@ -145,7 +146,7 @@ class TaskGenerator:
     def convert_to_tensor(self, np_objects):
         return [tf.convert_to_tensor(obj) for obj in np_objects]
     
-    def generate_set(self, folder_list, k_shot=1, k_query=15, shuffle=True):
+    def generate_set(self, folder_list, shuffle=True):
         k_shot = self.spt_num
         k_query = self.qry_num
         set_sampler = lambda x: random.sample(x, k_shot+k_query)
@@ -168,25 +169,23 @@ class TaskGenerator:
         # Function for slicing the dataset
         # support set & query set
         def _slice_set(ds):
-            spt_x = []
-            spt_y = []
-            qry_x = []
-            qry_y = []
-            # 此处是从每类的16张图片中抽取第一张作为support set， 其余15张作为query set
+            spt_x = list()
+            spt_y = list()
+            qry_x = list()
+            qry_y = list()
+            # 此处是从每类的k_shot+k_query张图片中抽取k_shot张作为support set， 其余作为query set
             # 并且按照图片路径读取图片，对label进行one hot编码
             # 将support set和query set整体转化为张量
             for i, class_elem in enumerate(ds):
-                for j, image_elem in enumerate(class_elem):
-                    if j == 0:
-                        image = self.read_images(image_elem[0])
-                        spt_x.append(image)
-                        label = tf.one_hot(image_elem[1], self.n_way)
-                        spt_y.append(label)
-                    else:
-                        image = self.read_images(image_elem[0])
-                        qry_x.append(image)
-                        label = tf.one_hot(image_elem[1], self.n_way)
-                        qry_y.append(label)
+                spt_elem = random.sample(class_elem, self.spt_num)
+                qry_elem = [elem for elem in class_elem if elem not in spt_elem]
+                spt_elem = list(zip(*spt_elem))
+                qry_elem = list(zip(*qry_elem))
+                spt_x.extend([self.read_images(img) for img in spt_elem[0]])
+                spt_y.extend([tf.one_hot(label, self.n_way) for label in spt_elem[1]])
+                qry_x.extend([self.read_images(img) for img in qry_elem[0]])
+                qry_y.extend([tf.one_hot(label, self.n_way) for label in qry_elem[1]])
+
             # Shuffle datasets
             spt_x, spt_y = self.shuffle_set(spt_x, spt_y)
             qry_x, qry_y = self.shuffle_set(qry_x, qry_y)

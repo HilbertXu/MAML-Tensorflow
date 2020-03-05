@@ -39,23 +39,27 @@ class MetaLearner(tf.keras.models.Model):
         # for miniimagener dataset set conv2d kernel size=[32, 3, 3]
         # for ominiglot dataset set conv2d kernel size=[64, 3, 3]
         if args is not None:
-            self.filters = args.num_filters
-            self.ip_size = (1, args.img_size, args.img_size, args.img_channel)
-            self.op_channel = args.n_way
-            self.with_bn = args.with_bn
-            self.training = True if args.mode is 'train' else False
-        elif bn is not None:
-            self.filters     = 32
-            self.ip_size     = (1, 84, 84, 3)
-            self.op_channel  = 5
-            self.training    = True
-            self.with_bn     = bn
-        else: 
-            self.filters     = 32
-            self.ip_size     = (1, 84, 84, 3)
-            self.op_channel  = 5
-            self.training    = True
-            self.with_bn     = False
+            if args.dataset == 'miniimagenet':
+                self.filters = 32
+                self.ip_size = (1, 84, 84, 3)
+                self.op_channel = args.n_way    
+                self.with_bn = args.with_bn
+                self.training = True if args.mode is 'train' else False
+            if args.dataset == 'omniglot':
+                self.filters = 64
+                self.ip_size = (1, 28, 28, 1)
+                self.op_channel = args.n_way    
+                self.with_bn = args.with_bn
+                self.training = True if args.mode is 'train' else False
+        else:
+            self.filters = 32
+            self.ip_size = (1, 84, 84, 3)
+            self.op_channel = 5    
+            self.training = True
+            if bn is not None:
+                self.with_bn     = bn
+            else: 
+                self.with_bn     = False
 
         if self.with_bn is True:
             # Build model layers
@@ -126,7 +130,8 @@ class MetaLearner(tf.keras.models.Model):
         '''
         :return initialized model
         '''
-        model.build((1, 84, 84, 3))
+        ip_size = model.ip_size
+        model.build(ip_size)
         return model
 
     
@@ -151,7 +156,7 @@ class MetaLearner(tf.keras.models.Model):
         If not, when we call copied_model(x) tf will reinitialize the model weights and overwrite the fast weights
         At the same time, GradientTape will fail to record it and the gradients will return Nones
         '''
-        copied_model.build((1, 84, 84, 3))
+        copied_model.build(model.ip_size)
 
         if copied_model.with_bn is True:
             copied_model.conv_1.kernel = model.conv_1.kernel

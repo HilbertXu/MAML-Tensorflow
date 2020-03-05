@@ -116,13 +116,13 @@ def maml_train(model, batch_generator):
     print_steps = args.print_steps
     inner_lr = args.inner_lr
     meta_lr = args.meta_lr
-    ckpt_dir = args.ckpt_dir + '{}way{}shot/'.format(n_way, k_shot)
+    ckpt_dir = args.ckpt_dir + args.dataset+'/{}way{}shot/'.format(n_way, k_shot)
     print ('Start training process of {}-way {}-shot {}-query problem'.format(args.n_way, args.k_shot, args.k_query))
     print ('{} steps, inner_lr: {}, meta_lr:{}, meta_batchsz:{}'.format(total_steps, inner_lr, meta_lr, meta_batchsz))
 
     # Initialize Tensorboard writer
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = args.log_dir + '{}way{}shot/'.format(n_way, k_shot) + current_time
+    log_dir = args.log_dir + args.dataset +'/{}way{}shot/'.format(n_way, k_shot) + current_time
     summary_writer = tf.summary.create_file_writer(log_dir)
 
     # Meta optimizer for update model parameters
@@ -198,15 +198,17 @@ def maml_train(model, batch_generator):
         if step % ckpt_steps == 0 and step > 0:
             checkpoint.save(ckpt_dir+'maml_model.ckpt')
     
+    # Record training history
+    os.chdir(args.his_dir)
     losses_plot, = plt.plot(losses, label = "Train Acccuracy", color='coral')
     accs_plot, = plt.plot(accs,'--',label = "Train Loss", color='royalblue')
     # accs_plot = plt.plot(accs, '--',color='blue')
     plt.legend([losses_plot, accs_plot], ['Train Loss', 'Train Accuracy'])
-    plt.title('{}-Way {}-Shot MAML Training Process'.format(n_way, k_shot))
-    plt.savefig('../{}-way-{}-shot.png'.format(n_way, k_shot))
+    plt.title('{} {}-Way {}-Shot MAML Training Process'.format(args.dataset, n_way, k_shot))
+    plt.savefig('{}-{}-way-{}-shot.png'.format(args.dataset, n_way, k_shot))
 
-    train_hist = '../{}-way{}-shot-train.txt'.format(n_way,k_shot)
-    acc_hist = '../{}-way{}-shot-acc.txt'.format(n_way,k_shot)
+    train_hist = '{}-{}-way{}-shot-train.txt'.format(args.dataset, n_way,k_shot)
+    acc_hist = '{}-{}-way{}-shot-acc.txt'.format(args.dataset, n_way,k_shot)
     # Save History
     f = open(train_hist, 'w')
     for i in range(len(losses)):
@@ -277,10 +279,8 @@ if __name__ == '__main__':
     # Task options
     argparse.add_argument('--n_way', type=int, help='Number of classes used in classification (e.g. 5-way classification)', default=5)
     argparse.add_argument('--k_shot', type=int, help='Number of images in support set', default=1)
-    argparse.add_argument('--k_query', type=int, help='Number of images in query set', default=15)
+    argparse.add_argument('--k_query', type=int, help='Number of images in query set(For Omniglot, equal to k_shot)', default=15)
     # Model options
-    argparse.add_argument('--img_size', type=int, help='The size of images input neural net (84 for MiniImagenet, 28 for Ominiglot)', default=84)
-    argparse.add_argument('--img_channel', type=int, help='Number of channels of input images (3 for MiniImagenet, 1 for Ominiglot)', default=3)
     argparse.add_argument('--num_filters', type=int, help='Number of filters in the convolution layers (32 for MiniImagenet, 64 for Ominiglot)', default=32)
     argparse.add_argument('--with_bn', type=bool, help='Turn True to add BatchNormalization layers in neural net', default=False)
     # Training options
@@ -291,9 +291,10 @@ if __name__ == '__main__':
     argparse.add_argument('--total_steps', type=int, help='Total update steps for each epoch', default=20000)
     # Log options
     argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=1000)
-    argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=500)
+    argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=200)
     argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../../logs/')
     argparse.add_argument('--ckpt_dir', type=str, help='Path to the checkpoint directory', default='../../weights/')
+    argparse.add_argument('--his_dir', type=str, help='Path to the training history directory', default='../../historys/')
     # Generate args
     args = argparse.parse_args()
     
@@ -301,13 +302,14 @@ if __name__ == '__main__':
     model = MetaLearner(args=args)
     model = MetaLearner.initialize(model)
     model.summary()
-
-    model = restore_model(model, '../../weights')
-
+    # Initialize task generator
     batch_generator = TaskGenerator(args)
-    
-    # model = maml_train(model, batch_generator)
-    eval_model(model, batch_generator)
+
+    if args.mode == 'train':
+        model = maml_train(model, batch_generator)
+    elif args.mode == 'test':
+        model = restore_model(model, '../../weights/{}/{}way{}shot'.format(args.dataset, args.n_way, args.k_shot))
+        eval_model(model, batch_generator)
     
 
     

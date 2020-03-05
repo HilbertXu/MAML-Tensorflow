@@ -22,57 +22,10 @@ from PIL import Image
 import tensorflow as tf
 import cv2
 
-META_TRAIN_DIR = '../../dataset/miniImagenet/train'
-META_VAL_DIR = '../../dataset/miniImagenet/test'
 
-
-class ImageProc:
-    def __init__(self):
-        self.path_to_image = '../dataset/miniImagenet/'
-        all_images = glob.glob(self.path_to_image + '/images/*')
-        # Resize images
-        with tqdm(total=len(all_images)) as pbar:
-            for i, image_file in enumerate(all_images):
-                img = Image.open(image_file)
-                img = img.resize((84,84), resample=Image.LANCZOS)
-                img.save(image_file)
-                if i % 500 == 0 and i > 0:
-                    pbar.set_description('{} images processed'.format(i))
-                    pbar.update(500)
-
-
-    def set_dir(self):
-        os.chdir(self.path_to_image)
-        for datatype in ['train', 'test', 'val']:
-            if os.path.exists(datatype) is False:
-                print ('create /{} directories'.format(datatype))
-                os.system('mkdir {}'.format(datatype))
-            else:
-                print ('Directories /{} already exist'.format(datatype))
-            count = len(open(datatype + '.csv', 'r').readlines())
-            with open(datatype + '.csv', 'r') as csvfile:
-                print ('Reading {}.csv, {} images in total'.format(datatype, count-1))
-                reader = csv.reader(csvfile, delimiter=',')
-                last_label = ''
-                with tqdm(total=count) as pbar:
-                    for i, row in enumerate(reader):
-                        if i == 0:  # skip the headers
-                            continue
-                        image_name = row[0]
-                        label = row[1]
-                        # Set up a folder for a new class
-                        if label != last_label:
-                            label_dir = datatype + '/' + label + '/'
-                            os.system('mkdir -p {}'.format(label_dir))
-                            last_label = label
-                        os.system('mv images/' + image_name+ ' ' + label_dir)
-
-                        if i % 400 == 0 and i > 0:
-                            pbar.set_description('{} {} images moved'.format(datatype, i))
-                            pbar.update(500)
         
 class TaskGenerator:
-    def __init__(self, args):
+    def __init__(self, args=None):
         '''
         :param mode: train or test
         :param n_way: a train task contains images from different N classes
@@ -81,55 +34,96 @@ class TaskGenerator:
         :param meta_batchsz: the number of tasks in a batch
         :param total_batch_num: the number of batches
         '''
+        if args is not None:
+            self.dataset = args.dataset
+            self.mode = args.mode
+            self.meta_batchsz = args.meta_batchsz
+            self.n_way = args.n_way
+            self.spt_num = args.k_shot
+            self.qry_num = args.k_query
+            self.dim_output = self.n_way
+        else:
+            self.dataset = 'miniimagenet'
+            self.mode = 'train'
+            self.meta_batchsz = 4
+            self.n_way = 5
+            self.spt_num = 1
+            self.qry_num = 15
+            self.img_size = 84
+            self.img_channel = 3
+            self.dim_output = self.n_way
         # For example:
-        # 5-way 1-shot 15-query
-        if args.dataset == 'miniimagenet':
-            self.mode = args.mode
-            self.meta_batchsz = args.meta_batchsz
-            self.n_way = args.n_way
-            self.spt_num = args.k_shot
-            self.qry_num = args.k_query
-            self.img_size = args.img_size
-            self.img_channel = args.img_channel
-            self.dim_output = self.n_way
+        # 5-way 1-shot 15-query for MiniImagenet
+        if self.dataset == 'miniimagenet':
+            self.img_size = 84
+            self.img_channel = 3
+            META_TRAIN_DIR = '../../dataset/miniImagenet/train'
+            META_VAL_DIR = '../../dataset/miniImagenet/test'
+            # Set sample folders
+            self.metatrain_folders = [os.path.join(META_TRAIN_DIR, label) \
+                                        for label in os.listdir(META_TRAIN_DIR) \
+                                            if os.path.isdir(os.path.join(META_TRAIN_DIR, label))
+                                        ]
+            self.metaval_folders = [os.path.join(META_VAL_DIR, label) \
+                                        for label in os.listdir(META_VAL_DIR) \
+                                            if os.path.isdir(os.path.join(META_VAL_DIR, label))
+                                        ]
         
-        if args.dataset == 'ominiglot':
-            self.mode = args.mode
-            self.meta_batchsz = args.meta_batchsz
-            self.n_way = args.n_way
-            self.spt_num = args.k_shot
-            self.qry_num = args.k_query
-            self.img_size = args.img_size
-            self.img_channel = args.img_channel
-            self.dim_output = self.n_way
-            
-        # Set sample folders
-        self.metatrain_folders = [os.path.join(META_TRAIN_DIR, label) \
-                                    for label in os.listdir(META_TRAIN_DIR) \
-                                        if os.path.isdir(os.path.join(META_TRAIN_DIR, label))
-                                    ]
-        self.metaval_folders = [os.path.join(META_VAL_DIR, label) \
-                                    for label in os.listdir(META_VAL_DIR) \
-                                        if os.path.isdir(os.path.join(META_VAL_DIR, label))
-                                    ]
+        if self.dataset == 'omniglot':
+            self.img_size = 28
+            self.img_channel = 1
+            if self.spt_num != self.qry_num:
+                # For Omniglot dataset set k_query = k_shot
+                self.qry_num = self.spt_num
+            data_folder = '../../dataset/omniglot'
+            character_folders = [
+                os.path.join(data_folder, family, character) \
+                    for family in os.listdir(data_folder) \
+                        if os.path.isdir(os.path.join(data_folder, family)) \
+                            for character in os.listdir(os.path.join(data_folder, family))
+            ]
+            # Shuffle dataset
+            random.seed(9314)
+            random.shuffle(character_folders)
+            # Slice dataset to train set and test set
+            # Use 1400 Alphabets as train set, the rest as test set
+            self.metatrain_folders = character_folders[:1400]
+            self.metaval_folders = character_folders[1400:]   
+        
         # Record the relationship between image label and the folder name in each task
         self.label_map = []
     
     def print_label_map(self):
         print ('[TEST] Label map of current Batch')
-        if len(self.label_map) > 0:
-            for i, task in enumerate(self.label_map):
-                print ('========= Task {} =========='.format(i+1))
-                for i, ref in enumerate(task):
-                    path = ref[0]
-                    label = path.split('/')[-1]
-                    print ('map {} --> {}\t'.format(label, ref[1]), end='')
-                    if i == 4:
-                        print ('')
-            print ('========== END ==========')
-            self.label_map = []
-        elif len(self.label_map) == 0:
-            print ('ERROR! print_label_map() function must be called after generating a batch dataset')
+        if self.dataset == 'miniimagenet':
+            if len(self.label_map) > 0:
+                for i, task in enumerate(self.label_map):
+                    print ('========= Task {} =========='.format(i+1))
+                    for i, ref in enumerate(task):
+                        path = ref[0]
+                        label = path.split('/')[-1]
+                        print ('map {} --> {}\t'.format(label, ref[1]), end='')
+                        if i == 4:
+                            print ('')
+                print ('========== END ==========')
+                self.label_map = []
+            elif len(self.label_map) == 0:
+                print ('ERROR! print_label_map() function must be called after generating a batch dataset')
+        elif self.dataset == 'omniglot':
+            if len(self.label_map) > 0:
+                for i, task in enumerate(self.label_map):
+                    print ('========= Task {} =========='.format(i+1))
+                    for i, ref in enumerate(task):
+                        path = ref[0]
+                        label = path.split('/')[-2] +'/'+ path.split('/')[-1]
+                        print ('map {} --> {}\t'.format(label, ref[1]), end='')
+                        if i == 4:
+                            print ('')
+                print ('========== END ==========')
+                self.label_map = []
+            elif len(self.label_map) == 0:
+                print ('ERROR! print_label_map() function must be called after generating a batch dataset')
+
                     
     def shuffle_set(self, set_x, set_y):
         # Shuffle
@@ -141,7 +135,12 @@ class TaskGenerator:
         return set_x, set_y
 
     def read_images(self, image_file):
-        return np.reshape(cv2.imread(image_file).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel))
+        if self.dataset == 'omniglot':
+            # For Omniglot dataset image size:[28, 28, 1]
+            return np.reshape(cv2.cvtColor(cv2.imread(image_file), cv2.COLOR_BGR2GRAY).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel))
+        if self.dataset == 'miniimagenet':
+            # For Omniglot dataset image size:[84, 84, 3]
+            return np.reshape(cv2.imread(image_file).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel))
     
     def convert_to_tensor(self, np_objects):
         return [tf.convert_to_tensor(obj) for obj in np_objects]
@@ -204,7 +203,6 @@ class TaskGenerator:
         if self.mode == 'train':
             folders = self.metatrain_folders
         if self.mode == 'test':
-            print ('sample from test folders')
             folders = self.metaval_folders
         # Shuffle root folder in order to prevent repeat
         random.shuffle(folder)
@@ -224,3 +222,4 @@ class TaskGenerator:
             batch_set.append((support_x, support_y, query_x, query_y))
         # return [meta_batchsz * (support_x, support_y, query_x, query_y)]
         return batch_set
+

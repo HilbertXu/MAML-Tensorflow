@@ -1,0 +1,2 @@
+model_checkpoint_path: "maml_model.ckpt-20"
+all_model_checkpoint_paths: "maml_model.ckpt-20"

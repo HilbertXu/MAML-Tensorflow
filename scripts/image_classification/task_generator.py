@@ -75,12 +75,12 @@ class TaskGenerator:
             if self.spt_num != self.qry_num:
                 # For Omniglot dataset set k_query = k_shot
                 self.qry_num = self.spt_num
-            data_folder = '../../dataset/omniglot'
+            DATA_FOLDER = '../../dataset/omniglot'
             character_folders = [
-                os.path.join(data_folder, family, character) \
-                    for family in os.listdir(data_folder) \
-                        if os.path.isdir(os.path.join(data_folder, family)) \
-                            for character in os.listdir(os.path.join(data_folder, family))
+                os.path.join(DATA_FOLDER, family, character) \
+                    for family in os.listdir(DATA_FOLDER) \
+                        if os.path.isdir(os.path.join(DATA_FOLDER, family)) \
+                            for character in os.listdir(os.path.join(DATA_FOLDER, family))
             ]
             # Shuffle dataset
             random.seed(9314)

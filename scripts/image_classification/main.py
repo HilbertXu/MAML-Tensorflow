@@ -291,7 +291,7 @@ if __name__ == '__main__':
     argparse.add_argument('--total_steps', type=int, help='Total update steps for each epoch', default=20000)
     # Log options
     argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=1000)
-    argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=200)
+    argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=100)
     argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../../logs/')
     argparse.add_argument('--ckpt_dir', type=str, help='Path to the checkpoint directory', default='../../weights/')
     argparse.add_argument('--his_dir', type=str, help='Path to the training history directory', default='../../historys/')

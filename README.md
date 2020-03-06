@@ -51,24 +51,19 @@ If you set the `--update_steps > 1`, it will take more time for one training ste
 
    ```python
    if self.dataset == 'miniimagenet':
-               self.img_size = 84
-               self.img_channel = 3
-               META_TRAIN_DIR = '../../dataset/miniImagenet/train'
-               META_VAL_DIR = '../../dataset/miniImagenet/test'
-               ...
-           
-           if self.dataset == 'omniglot':
-               self.img_size = 28
-               self.img_channel = 1
-               if self.spt_num != self.qry_num:
-                   # For Omniglot dataset set k_query = k_shot
-                   self.qry_num = self.spt_num
-               DATA_FOLDER = '../../dataset/omniglot'
-               ... 
-   ```
-
+       ...
+       META_TRAIN_DIR = '../../dataset/miniImagenet/train'
+       META_VAL_DIR = '../../dataset/miniImagenet/test'
+       ...
    
-
+   if self.dataset == 'omniglot':
+       ...
+           DATA_FOLDER = '../../dataset/omniglot'
+           ... 
+   ```
+   
+   
+   
 5. Run the main python script
 
    ```

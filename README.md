@@ -3,8 +3,6 @@ Tensorflow r2.1 reimplementation of Model-Agnostic Meta-Learning from this paper
 
 [Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks](https://arxiv.org/abs/1703.03400)
 
-[]: 
-
 ## Project Requirements
 
 1. python 3.x

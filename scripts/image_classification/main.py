@@ -220,7 +220,6 @@ def maml_train(model, batch_generator):
         f.write(str(accs[i]) + '\n')
     f.close()
 
-    
     return model
 
 def eval_model(model, batch_generator):
@@ -233,9 +232,12 @@ def eval_model(model, batch_generator):
     # Initialize optimizer
     optimizer = tf.keras.optimizers.SGD(learning_rate=args.inner_lr)
 
-    num_steps = (0, 1, 10, 100)
+    num_steps = (0, 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
     task_losses = [0, 0, 0, 0]
     task_accs = [0, 0, 0, 0]
+
+    loss_res = [[] for _ in range(len(batch_set))]
+    acc_res = [[] for _ in range(len(batch_set))]
     
     # Record test result
     if 0 in num_steps:
@@ -245,12 +247,11 @@ def eval_model(model, batch_generator):
             acc = accuracy_fn(query_y, pred)
             task_losses[idx] += loss.numpy()
             task_accs[idx] += acc.numpy()
+            loss_res[idx].append((0, loss.numpy()))
+            acc_res[idx].append((0, acc.numpy()))
         print ('Before any update steps, test result:')
         print ('Task losses: {}'.format(task_losses))
         print ('Task accuracies: {}'.format(task_accs))
-
-    task_losses = [0, 0, 0, 0]
-    task_accs = [0, 0, 0, 0]
     # Test for each task
     for idx, task in enumerate(batch_set):
         print ('========== Task {} =========='.format(idx+1))
@@ -260,14 +261,40 @@ def eval_model(model, batch_generator):
                 #regular_train_step(model, support_x, support_y, optimizer)
                 loss, pred = compute_loss(model, query_x, query_y)
             acc = accuracy_fn(query_y, pred)
+            
             grads = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(grads, model.trainable_variables))
             # Record result
             if step in num_steps:
+                loss_res[idx].append((step, loss.numpy()))
+                acc_res[idx].append((step, acc.numpy()))
                 print ('After {} steps update'.format(step))
                 print ('Task losses: {}'.format(loss.numpy()))
                 print ('Task accs: {}'.format(acc.numpy()))
                 print ('---------------------------------')
+    
+    for idx in range(len(batch_set)):
+        l_x=[]
+        l_y=[]
+        a_x = []
+        a_y=[]
+        # plt.subplot(2, 2, idx+1)
+        plt.figure()
+        for j in range(len(num_steps)):
+            l_x.append(loss_res[idx][j][0])
+            l_y.append(loss_res[idx][j][1])
+            a_x.append(acc_res[idx][j][0])
+            a_y.append(acc_res[idx][j][1])
+        plt.plot(l_x, l_y, 'x', color='coral')
+        plt.plot(a_x, a_y, '*', color='royalblue')
+        # plt.annotate('Loss After 1 Fine Tune Step: %.2f'%l_y[1], xy=(l_x[1], l_y[1]), xytext=(l_x[1]-0.2, l_y[1]-0.2))
+        # plt.annotate('Accuracy After 1 Fine Tune Step: %.2f'%a_y[1], xy=(a_x[1], a_y[1]), xytext=(a_x[1]-0.2, a_y[1]-0.2))
+        plt.plot(l_x, l_y, linestyle='--', color='coral')
+        plt.plot(a_x, a_y, linestyle='--', color='royalblue')
+        legend=['Fine Tune Points','Fine Tune Points','Loss', 'Accuracy']
+        plt.legend(legend)
+        plt.title('Task {} Fine Tuning Process'.format(idx+1))
+        plt.show()
 
 
 
@@ -310,8 +337,6 @@ if __name__ == '__main__':
     elif args.mode == 'test':
         model = restore_model(model, '../../weights/{}/{}way{}shot'.format(args.dataset, args.n_way, args.k_shot))
         eval_model(model, batch_generator)
-    
-
     
 
 

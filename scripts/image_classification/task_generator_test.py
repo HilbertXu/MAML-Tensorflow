@@ -22,8 +22,6 @@ from PIL import Image
 import tensorflow as tf
 import cv2
 
-
-        
 class TaskGenerator:
     def __init__(self, args=None):
         '''
@@ -42,6 +40,7 @@ class TaskGenerator:
             self.spt_num = args.k_shot
             self.qry_num = args.k_query
             self.dim_output = self.n_way
+            self.visual = args.visual
         else:
             self.dataset = 'miniimagenet'
             self.mode = 'train'
@@ -52,6 +51,7 @@ class TaskGenerator:
             self.img_size = 84
             self.img_channel = 3
             self.dim_output = self.n_way
+            self.visual = False
         # For example:
         # 5-way 1-shot 15-query for MiniImagenet
         if self.dataset == 'miniimagenet':
@@ -68,6 +68,7 @@ class TaskGenerator:
                                         for label in os.listdir(META_VAL_DIR) \
                                             if os.path.isdir(os.path.join(META_VAL_DIR, label))
                                         ]
+            random.shuffle(self.metatrain_folders)
         
         if self.dataset == 'omniglot':
             self.img_size = 28
@@ -89,7 +90,6 @@ class TaskGenerator:
             # Use 1400 Alphabets as train set, the rest as test set
             self.metatrain_folders = character_folders[:1400]
             self.metaval_folders = character_folders[1400:]   
-        
         # Record the relationship between image label and the folder name in each task
         self.label_map = []
     
@@ -124,7 +124,7 @@ class TaskGenerator:
             elif len(self.label_map) == 0:
                 print ('ERROR! print_label_map() function must be called after generating a batch dataset')
 
-                    
+    
     def shuffle_set(self, set_x, set_y):
         # Shuffle
         set_seed = random.randint(0, 100)
@@ -133,41 +133,37 @@ class TaskGenerator:
         random.seed(set_seed)
         random.shuffle(set_y)
         return set_x, set_y
-
+    
     def read_images(self, image_file):
         if self.dataset == 'omniglot':
             # For Omniglot dataset image size:[28, 28, 1]
             return np.reshape(cv2.cvtColor(cv2.imread(image_file), cv2.COLOR_BGR2GRAY).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel))
         if self.dataset == 'miniimagenet':
             # For Omniglot dataset image size:[84, 84, 3]
-            return np.reshape(cv2.imread(image_file).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel))
+            return np.reshape(cv2.imread(image_file).astype(np.float32)/255, (self.img_size, self.img_size, self.img_channel)) 
     
     def convert_to_tensor(self, np_objects):
         return [tf.convert_to_tensor(obj) for obj in np_objects]
-    
-    def generate_set(self, folder_list, shuffle=True):
-        k_shot = self.spt_num
-        k_query = self.qry_num
-        set_sampler = lambda x: random.sample(x, k_shot+k_query)
-        label_map = []
+
+    def generate_task_set(self, tasks, shuffle=True):
+        task_sampler = lambda x: random.sample(x, self.spt_num+self.qry_num)
         images_with_labels = []
-        # sample images for support set and query set
-        # images_with_labels: size [5, 16] 5 classes with 16 images & labels per class
-        for i, elem in enumerate(folder_list):
-            folder = elem[0]
-            label = elem[1]
-            label_map.append((folder, label))
-            image_with_label = [(os.path.join(folder, image), label) \
-                                for image in set_sampler(os.listdir(folder))]
-            images_with_labels.append(image_with_label)
-        self.label_map.append(label_map)
+
+        for i, task in enumerate(tasks):
+            label_map = []
+            for n, elem in enumerate(task):
+                folder = elem[1]
+                label = elem[0]
+                label_map.append((folder, label))
+                image_with_label = [(os.path.join(folder, image), label) \
+                                for image in task_sampler(os.listdir(folder))]
+                images_with_labels.append(image_with_label)
+            self.label_map.append(label_map)
         if shuffle == True:
             for i, elem in enumerate(images_with_labels):
                 random.shuffle(elem)
-        
-        # Function for slicing the dataset
-        # support set & query set
-        def _slice_set(ds):
+
+        def _slice_support_query(ds):
             spt_x = list()
             spt_y = list()
             qry_x = list()
@@ -192,48 +188,32 @@ class TaskGenerator:
             spt_x, spt_y = self.convert_to_tensor((np.array(spt_x), np.array(spt_y)))
             qry_x, qry_y = self.convert_to_tensor((np.array(qry_x), np.array(qry_y)))
             return spt_x, spt_y, qry_x, qry_y
-        return _slice_set(images_with_labels)
-              
+        return _slice_support_query(images_with_labels)
+    
     def batch(self):
-        '''
-        :return: a batch of support set tensor and query set tensor
-        
-        '''
-        folder = []
-        def batch(self):
-        '''
-        :return: a batch of support set tensor and query set tensor
-        
-        '''
-        folder = []
+        folders = []
         if self.mode == 'train':
             folders = self.metatrain_folders
+            # Shuffle root folder in order to prevent repeat
+            random.shuffle(folders)
+            # Firstly sample n_way*meta_batchsz classes from all folders
+            class_folders = random.sample(folders, self.n_way*self.meta_batchsz)
+            # Shuffle folders
+            random.shuffle(class_folders)
+            tasks = []
+            for i in range(self.meta_batchsz):
+                task_classes = class_folders[self.n_way*i:self.n_way*(i+1)]
+                random.shuffle(task_classes)
+                tmp = []
+                for idx, task_class in enumerate(task_classes):
+                    tmp.append((idx, task_class))
+                tasks.append(tmp)
+        
+            self.generate_task_set(tasks)
+            
         if self.mode == 'test':
             folders = self.metaval_folders
-        # Shuffle root folder in order to prevent repeat
-        random.shuffle(folder)
-        batch_set = []
-        # Firstly sample n_way*meta_batchsz classes from all folders
-        class_folders = random.sample(folders, self.n_way*self.meta_batchsz)
-        # Shuffle folders
-        random.shuffle(class_folders)
-        # Generate batch dataset
-        # batch_spt_set: [meta_batchsz, n_way * k_shot, image_size] & [meta_batchsz, n_way * k_shot, n_way]
-        # batch_qry_set: [meta_batchsz, n_way * k_query, image_size] & [meta_batchsz, n_way * k_query, n_way]
-        for i in range(self.meta_batchsz):
-            sampled_folders = class_folders[self.n_way*i:self.n_way*(i+1)]
-            random.shuffle(sampled_folders)
-            folder_with_label = []
-            for i, folder in enumerate(sampled_folders):
-                elem = (folder, i)
-                folder_with_label.append(elem)
-            support_x, support_y, query_x, query_y = self.generate_set(folder_with_label)
-            batch_set.append((support_x, support_y, query_x, query_y))
-        # return [meta_batchsz * (support_x, support_y, query_x, query_y)]
-        return batch_set
-
+        
 if __name__ == '__main__':
-    tasks = TaskGenerator()
-    for i in range(20):
-        tasks.batch()
-        tasks.print_label_map()
+    task = TaskGenerator()
+    task.batch()

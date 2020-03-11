@@ -30,21 +30,38 @@ def write_histogram(model, writer, step):
             if 'conv' in layer.name or 'dense' in layer.name:
                 tf.summary.histogram(layer.name+':kernel', layer.kernel, step=step)
                 tf.summary.histogram(layer.name+':bias', layer.bias, step=step)
+            if 'batch_normalization' in layer.name:
+                tf.summary.histogram(layer.name+':gamma', layer.gamma, step=step)
+                tf.summary.histogram(layer.name+':beta', layer.beta, step=step)
 
-def write_gradient(grads, writer, step):
+
+def write_gradient(grads, writer, step, with_bn=True):
     '''
     :param grads: Gradients on query set
     :param writer: tf.summary writer
     :param step: Current training step
     '''
-    name = [
-        'conv_0:kernel_grad', 'conv_0:bias_grad', 'conv_1:kernel_grad', 'conv_1:bias_grad',
-        'conv_2:kernel_grad', 'conv_2:bias_grad', 'conv_3:kernel_grad', 'conv_3:bias_grad',
-        'dense:kernel_grad', 'dense:bias_grad'
-    ]
-    with writer.as_default():
-        for idx, grad in enumerate(grads):
-            tf.summary.histogram(name[idx], grad, step=step)
+    if with_bn:
+        name = [
+            'conv_0:kernel_grad', 'conv_0:bias_grad', 'batch_normalization_1:gamma_grad', 'batch_normalization_1:beta_grad',
+            'conv_1:kernel_grad', 'conv_1:bias_grad', 'batch_normalization_2:gamma_grad', 'batch_normalization_2:beta_grad',
+            'conv_2:kernel_grad', 'conv_2:bias_grad', 'batch_normalization_3:gamma_grad', 'batch_normalization_3:beta_grad',
+            'conv_3:kernel_grad', 'conv_3:bias_grad', 'batch_normalization_4:gamma_grad', 'batch_normalization_4:beta_grad',
+            'dense:kernel_grad', 'dense:bias_grad'
+        ]
+        with writer.as_default():
+            for idx, grad in enumerate(grads):
+                tf.summary.histogram(name[idx], grad, step=step)
+    elif with_bn is False:
+        name = [
+            'conv_0:kernel_grad', 'conv_0:bias_grad', 'conv_1:kernel_grad', 'conv_1:bias_grad',
+            'conv_2:kernel_grad', 'conv_2:bias_grad', 'conv_3:kernel_grad', 'conv_3:bias_grad',
+            'dense:kernel_grad', 'dense:bias_grad'
+        ]
+        with writer.as_default():
+            for idx, grad in enumerate(grads):
+                tf.summary.histogram(name[idx], grad, step=step)
+
 
 def restore_model(model, weights_dir):
     '''
@@ -134,12 +151,12 @@ def regular_train_step(model, x, y, optimizer):
     apply_gradients(optimizer, gradients, model.trainable_variables)
     return model
 
-def maml_train(model, batch_generator, test_generator):
+def maml_train(model, batch_generator):
     # Set parameters
     visual = args.visual
     n_way = args.n_way
     k_shot = args.k_shot
-    total_steps = args.total_steps
+    total_batches = args.total_batches
     meta_batchsz = args.meta_batchsz
     update_steps = args.update_steps
     update_steps_test = args.update_steps_test
@@ -150,7 +167,7 @@ def maml_train(model, batch_generator, test_generator):
     meta_lr = args.meta_lr
     ckpt_dir = args.ckpt_dir + args.dataset+'/{}way{}shot/'.format(n_way, k_shot)
     print ('Start training process of {}-way {}-shot {}-query problem'.format(args.n_way, args.k_shot, args.k_query))
-    print ('{} steps, inner_lr: {}, meta_lr:{}, meta_batchsz:{}'.format(total_steps, inner_lr, meta_lr, meta_batchsz))
+    print ('{} steps, inner_lr: {}, meta_lr:{}, meta_batchsz:{}'.format(total_batches, inner_lr, meta_lr, meta_batchsz))
 
     # Initialize Tensorboard writer
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -167,12 +184,15 @@ def maml_train(model, batch_generator, test_generator):
     test_losses = []
     test_accs = []
 
+    test_min_losses = []
+    test_max_accs = []
+
     def _test_step(test_set):
         # Set up recorders for test batch
         batch_loss = [0 for _ in range(meta_batchsz)]
         batch_acc = [0 for _ in range(meta_batchsz)]
         # Set up copied model
-        copied_model = MetaLearner.hard_copy(model)
+        copied_model = MetaLearner.hard_copy(model, args)
         for idx, task in enumerate(test_set):
             # Slice task to support set and query set
             support_x, support_y, query_x, query_y = task
@@ -184,7 +204,7 @@ def maml_train(model, batch_generator, test_generator):
                     inner_tape.watch(copied_model.inner_weights)
                     inner_loss, _ = compute_loss(copied_model, support_x, support_y)
                 inner_grads = inner_tape.gradient(inner_loss, copied_model.inner_weights)
-                copied_model = MetaLearner.meta_update(copied_model, alpha=inner_lr, grads=inner_grads)
+                copied_model = MetaLearner.meta_update(copied_model, args, alpha=inner_lr, grads=inner_grads)
             # Compute task loss & accuracy on the query set
             task_loss, task_pred = compute_loss(copied_model, query_x, query_y, loss_fn=loss_fn)
             task_acc = accuracy_fn(query_y, task_pred)
@@ -214,7 +234,7 @@ def maml_train(model, batch_generator, test_generator):
                 if visual:
                     with summary_writer.as_default():
                         tf.summary.image('Support Images', support_x, max_outputs=5, step=step)
-                        tf.summary.image('QUery Images', query_x, max_outputs=5, step=step)
+                        tf.summary.image('Query Images', query_x, max_outputs=5, step=step)
                 # Update fast weights several times
                 for i in range(update_steps):
                     # Set up inner gradient tape, watch the copied_model.inner_weights
@@ -223,7 +243,7 @@ def maml_train(model, batch_generator, test_generator):
                         inner_tape.watch(copied_model.inner_weights)
                         inner_loss, _ = compute_loss(copied_model, support_x, support_y)
                     inner_grads = inner_tape.gradient(inner_loss, copied_model.inner_weights)
-                    copied_model = MetaLearner.meta_update(copied_model, alpha=inner_lr, grads=inner_grads)
+                    copied_model = MetaLearner.meta_update(copied_model, args, alpha=inner_lr, grads=inner_grads)
                 # Compute task loss & accuracy on the query set
                 task_loss, task_pred = compute_loss(copied_model, query_x, query_y, loss_fn=loss_fn)
                 task_acc = accuracy_fn(query_y, task_pred)
@@ -243,50 +263,56 @@ def maml_train(model, batch_generator, test_generator):
     # Main loop
     start = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     print ('Start at {}'.format(start))
-    # For each epoch update model total_steps times
+    # For each epoch update model total_batches times
     start = time.time()
-    for step in range(total_steps+1):
-        # Get a batch data
-        batch_set = batch_generator.batch()
-        # batch_generator.print_label_map()
-        # Run maml train step
-        batch_loss, batch_acc = _maml_train_step(batch_set)
-        if visual:
-            # Write histogram
-            write_histogram(model, summary_writer, step)
-        # Record Loss
-        losses.append(tf.reduce_mean(batch_loss).numpy())
-        accs.append(tf.reduce_mean(batch_acc).numpy())
-        # Write to Tensorboard
-        with summary_writer.as_default():
-            tf.summary.scalar('query loss', tf.reduce_mean(batch_loss), step=step)
-            tf.summary.scalar('query accuracy', tf.reduce_mean(batch_acc), step=step)
-        
+    for step in range(total_batches+1):
+        if step % ckpt_steps == 0 and step > 0:
+            print ('save checkpoints')
+            checkpoint.save(ckpt_dir+'maml_model.ckpt')
         # Evaluating model
         if step % test_steps == 0 and step > 0:
-            test_set = test_generator.batch()
-            test_generator.print_label_map()
+            test_set = batch_generator.test_batch()
+            batch_generator.print_label_map()
             test_loss, test_acc = _test_step(test_set)
             with summary_writer.as_default():
                 tf.summary.scalar('test loss', tf.reduce_mean(test_loss), step=step)
                 tf.summary.scalar('test accuracy', tf.reduce_mean(test_acc), step=step)
-            test_losses.append(tf.reduce_mean(test_loss).numpy())
-            test_accs.append(tf.reduce_mean(test_acc).numpy())
+            # Tensor to list            
             test_loss = [loss.numpy() for loss in test_loss]
             test_acc = [acc.numpy() for acc in test_acc]
+            # Record test history
+            test_losses.append(test_loss)
+            test_accs.append(test_acc)
             print ('Test Losses: {}, Test Accuracys: {}'.format(test_loss, test_acc))
             print ('=====================================================================')
-        # Print train result
-        if step % print_steps == 0 and step > 0:
-            batch_loss = [loss.numpy() for loss in batch_loss]
-            batch_acc = [acc.numpy() for acc in batch_acc]
-            print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}; Time to run {} Steps: {}'.format(step, batch_loss, batch_acc, print_steps, time.time()-start))
-            start = time.time()
-            # Uncomment to see the sampled folders of each task
-            # train_ds.print_label_map()
-        # Save checkpoint
-        if step % ckpt_steps == 0 and step > 0:
-            checkpoint.save(ckpt_dir+'maml_model.ckpt')
+        # Meta train step
+        else:
+            # Get a batch data
+            batch_set = batch_generator.train_batch()
+            # batch_generator.print_label_map()
+            # Run maml train step
+            batch_loss, batch_acc = _maml_train_step(batch_set)
+            if visual:
+                # Write histogram
+                write_histogram(model, summary_writer, step)
+            # Record Loss
+            losses.append(tf.reduce_mean(batch_loss).numpy())
+            accs.append(tf.reduce_mean(batch_acc).numpy())
+            # Write to Tensorboard
+            with summary_writer.as_default():
+                tf.summary.scalar('query loss', tf.reduce_mean(batch_loss), step=step)
+                tf.summary.scalar('query accuracy', tf.reduce_mean(batch_acc), step=step)
+        
+            # Print train result
+            if step % print_steps == 0 and step > 0:
+                batch_loss = [loss.numpy() for loss in batch_loss]
+                batch_acc = [acc.numpy() for acc in batch_acc]
+                print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}; Time to run {} Steps: {}'.format(step, batch_loss, batch_acc, print_steps, time.time()-start))
+                start = time.time()
+                # Uncomment to see the sampled folders of each task
+                # train_ds.print_label_map()
+                # Save checkpoint
+                
     
     # Record training history
     os.chdir(args.his_dir)
@@ -301,6 +327,7 @@ def maml_train(model, batch_generator, test_generator):
     acc_hist = '{}-{}-way{}-shot-acc.txt'.format(args.dataset, n_way,k_shot)
     test_acc_hist = '{}-{}-way{}-shot-acc-test.txt'.format(args.dataset, n_way,k_shot)
     test_loss_hist = '{}-{}-way{}-shot-loss-test.txt'.format(args.dataset, n_way,k_shot)
+
     # Save History
     f = open(train_hist, 'w')
     for i in range(len(losses)):
@@ -416,16 +443,16 @@ if __name__ == '__main__':
     argparse.add_argument('--k_query', type=int, help='Number of images in query set(For Omniglot, equal to k_shot)', default=15)
     # Model options
     argparse.add_argument('--num_filters', type=int, help='Number of filters in the convolution layers (32 for MiniImagenet, 64 for Ominiglot)', default=32)
-    argparse.add_argument('--with_bn', type=bool, help='Turn True to add BatchNormalization layers in neural net', default=False)
+    argparse.add_argument('--with_bn', type=bool, help='Turn True to add BatchNormalization layers in neural net', default=True)
     # Training options
     argparse.add_argument('--meta_batchsz', type=int, help='Number of tasks in one batch', default=4)
     argparse.add_argument('--update_steps', type=int, help='Number of inner gradient updates for each task', default=5)
-    argparse.add_argument('--update_steps_test', type=int, help='Number of inner gradient updates for each task while testing', default=10)
+    argparse.add_argument('--update_steps_test', type=int, help='Number of inner gradient updates for each task while testing', default=5)
     argparse.add_argument('--inner_lr', type=float, help='Learning rate of inner update steps, the step size alpha in the algorithm', default=1e-2) # 0.1 for ominiglot
     argparse.add_argument('--meta_lr', type=float, help='Learning rate of meta update steps, the step size beta in the algorithm', default=1e-3)
-    argparse.add_argument('--total_steps', type=int, help='Total update steps for each epoch', default=1000)
+    argparse.add_argument('--total_batches', type=int, help='Total update steps for each epoch', default=10)
     # Log options
-    argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=1000)
+    argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=5)
     argparse.add_argument('--test_steps', type=int, help='Number of steps for evaluating model', default=5)
     argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=1)
     argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../../logs/')
@@ -434,26 +461,20 @@ if __name__ == '__main__':
     # Generate args
     args = argparse.parse_args()
     
-    print ('Initialize model')
+    print ('Initialize model with 4 Conv({} filters) Blocks and 1 Dense Layer'.format(args.num_filters))
     model = MetaLearner(args=args)
+    print ('Build model')
     model = MetaLearner.initialize(model)
     model.summary()
     # Initialize task generator
     batch_generator = TaskGenerator(args)
-    # Initialize test generator
-    test_generator = TaskGenerator(args)
-    test_generator.mode = 'test'
 
     if args.mode == 'train':
         # model = restore_model(model, '../../weights/{}/{}way{}shot'.format(args.dataset, args.n_way, args.k_shot))
-        model = maml_train(model, batch_generator, test_generator)
+        model = maml_train(model, batch_generator)
     elif args.mode == 'test':
         model = restore_model(model, '../../weights/{}/{}way{}shot'.format(args.dataset, args.n_way, args.k_shot))
         if args.dataset == 'miniimagenet':
             eval_model(model, batch_generator, num_steps=(0, 1, 10, 100, 200, 300, 400, 500, 600))
         elif args.dataset == 'omniglot':
             eval_model(model, batch_generator, num_steps=(0, 1, 5, 100, 200, 300, 400, 500, 600))
-    
-
-
-   

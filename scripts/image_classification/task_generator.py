@@ -21,6 +21,7 @@ from tqdm._tqdm import trange
 from PIL import Image
 import tensorflow as tf
 import cv2
+import time
 
 
         
@@ -43,8 +44,8 @@ class TaskGenerator:
             self.qry_num = args.k_query
             self.dim_output = self.n_way
         else:
-            self.dataset = 'miniimagenet'
-            self.mode = 'train'
+            self.dataset = 'omniglot'
+            self.mode = 'test'
             self.meta_batchsz = 4
             self.n_way = 5
             self.spt_num = 1
@@ -88,12 +89,12 @@ class TaskGenerator:
             # Slice dataset to train set and test set
             # Use 1400 Alphabets as train set, the rest as test set
             self.metatrain_folders = character_folders[:1400]
-            self.metaval_folders = character_folders[1400:]   
+            self.metaval_folders = character_folders[1400:]  
         
         # Record the relationship between image label and the folder name in each task
         self.label_map = []
     
-    def print_label_map(self):
+    def print_label_map(self):          
         print ('[TEST] Label map of current Batch')
         if self.dataset == 'miniimagenet':
             if len(self.label_map) > 0:
@@ -145,10 +146,10 @@ class TaskGenerator:
     def convert_to_tensor(self, np_objects):
         return [tf.convert_to_tensor(obj) for obj in np_objects]
     
-    def generate_set(self, folder_list, shuffle=True):
+    def generate_set(self, folder_list, shuffle=False):
         k_shot = self.spt_num
         k_query = self.qry_num
-        set_sampler = lambda x: random.sample(x, k_shot+k_query)
+        set_sampler = lambda x: np.random.choice(x, k_shot+k_query, False)
         label_map = []
         images_with_labels = []
         # sample images for support set and query set
@@ -194,39 +195,60 @@ class TaskGenerator:
             return spt_x, spt_y, qry_x, qry_y
         return _slice_set(images_with_labels)
               
-    def batch(self):
+    def train_batch(self):
         '''
         :return: a batch of support set tensor and query set tensor
         
         '''
-        folder = []
-        def batch(self):
-        '''
-        :return: a batch of support set tensor and query set tensor
-        
-        '''
-        folder = []
-        if self.mode == 'train':
-            folders = self.metatrain_folders
-        if self.mode == 'test':
-            folders = self.metaval_folders
+        folders = self.metatrain_folders
         # Shuffle root folder in order to prevent repeat
-        random.shuffle(folder)
         batch_set = []
-        # Firstly sample n_way*meta_batchsz classes from all folders
-        class_folders = random.sample(folders, self.n_way*self.meta_batchsz)
-        # Shuffle folders
-        random.shuffle(class_folders)
+        self.label_map = []
         # Generate batch dataset
         # batch_spt_set: [meta_batchsz, n_way * k_shot, image_size] & [meta_batchsz, n_way * k_shot, n_way]
         # batch_qry_set: [meta_batchsz, n_way * k_query, image_size] & [meta_batchsz, n_way * k_query, n_way]
         for i in range(self.meta_batchsz):
-            sampled_folders = class_folders[self.n_way*i:self.n_way*(i+1)]
-            random.shuffle(sampled_folders)
+            sampled_folders_idx = np.array(np.random.choice(len(folders), self.n_way, False))
+            np.random.shuffle(sampled_folders_idx)
+            sampled_folders = np.array(folders)[sampled_folders_idx].tolist()
             folder_with_label = []
-            for i, folder in enumerate(sampled_folders):
-                elem = (folder, i)
-                folder_with_label.append(elem)
+            # for i, folder in enumerate(sampled_folders):
+            #     elem = (folder, i)
+            #     folder_with_label.append(elem)
+            labels = np.arange(self.n_way)
+            np.random.shuffle(labels)
+            labels = labels.tolist()
+            folder_with_label = list(zip(sampled_folders, labels))
+            support_x, support_y, query_x, query_y = self.generate_set(folder_with_label)
+            batch_set.append((support_x, support_y, query_x, query_y))
+        # return [meta_batchsz * (support_x, support_y, query_x, query_y)]
+        return batch_set
+    
+    def test_batch(self):
+        '''
+        :return: a batch of support set tensor and query set tensor
+        
+        '''
+        folders = self.metaval_folders
+        print ('Sample test batch from {} classes'.format(len(folders)))
+        # Shuffle root folder in order to prevent repeat
+        batch_set = []
+        self.label_map = [] 
+        # Generate batch dataset
+        # batch_spt_set: [meta_batchsz, n_way * k_shot, image_size] & [meta_batchsz, n_way * k_shot, n_way]
+        # batch_qry_set: [meta_batchsz, n_way * k_query, image_size] & [meta_batchsz, n_way * k_query, n_way]
+        for i in range(self.meta_batchsz):
+            sampled_folders_idx = np.array(np.random.choice(len(folders), self.n_way, False))
+            np.random.shuffle(sampled_folders_idx)
+            sampled_folders = np.array(folders)[sampled_folders_idx].tolist()
+            folder_with_label = []
+            # for i, folder in enumerate(sampled_folders):
+            #     elem = (folder, i)
+            #     folder_with_label.append(elem)
+            labels = np.arange(self.n_way)
+            np.random.shuffle(labels)
+            labels = labels.tolist()
+            folder_with_label = list(zip(sampled_folders, labels))
             support_x, support_y, query_x, query_y = self.generate_set(folder_with_label)
             batch_set.append((support_x, support_y, query_x, query_y))
         # return [meta_batchsz * (support_x, support_y, query_x, query_y)]
@@ -234,6 +256,15 @@ class TaskGenerator:
 
 if __name__ == '__main__':
     tasks = TaskGenerator()
+    tasks.mode = 'train'
     for i in range(20):
-        tasks.batch()
+        batch_set = tasks.train_batch()
         tasks.print_label_map()
+        print (len(batch_set))
+        time.sleep(5)
+    
+    '''
+    @TODO
+    change to np.random.choice
+    And find out the reason why so many repeat
+    '''

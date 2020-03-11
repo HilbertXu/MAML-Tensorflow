@@ -9,6 +9,7 @@ import glob
 import os
 import sys
 import random
+import argparse
 import numpy as np
 from tqdm import tqdm
 from tqdm._tqdm import trange
@@ -31,7 +32,7 @@ class ImageProc:
                     if i % 500 == 0 and i > 0:
                         pbar.set_description('{} images processed'.format(i))
                         pbar.update(500)
-            self.set_dir()
+            # self.set_dir()
         elif dataset == 'omniglot':
             print ('Processing Omniglot dataset')
             self.root = '../../dataset/omniglot'

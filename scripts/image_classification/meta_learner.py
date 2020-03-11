@@ -135,8 +135,8 @@ class MetaLearner(tf.keras.models.Model):
         return model
 
     @classmethod
-    def hard_copy(cls, model):
-        copied_model = cls(bn=model.with_bn)
+    def hard_copy(cls, model, args):
+        copied_model = cls(args)
         copied_model.build(model.ip_size)
 
         if copied_model.with_bn is True:
@@ -189,11 +189,9 @@ class MetaLearner(tf.keras.models.Model):
         
         return copied_model
 
-
-
     
     @classmethod
-    def meta_update(cls, model, alpha=0.01, grads=None):
+    def meta_update(cls, model, args, alpha=0.01, grads=None):
         '''
         :param cls: Class MetaLearner
         :param model: Model to be copied
@@ -204,7 +202,7 @@ class MetaLearner(tf.keras.models.Model):
         '''
         # Make a hard copy of target model
         # If with bn layers, call like copied_model = cls(bn=True)
-        copied_model = cls(bn=model.with_bn)
+        copied_model = cls(args)
         '''
         !!!!!!!!!!!
         IMPORTANT

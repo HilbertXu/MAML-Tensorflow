@@ -308,26 +308,28 @@ class MetaLearner(tf.keras.models.Model):
         return copied_model
 
     def call(self, x):
+        '''
+        @TODO Change network to conv-relu-bn-maxpool
+        '''
         if self.with_bn is True:
             # Conv block #1
-            x = tf.keras.activations.relu(self.max_pool_1(self.bn_1(self.conv_1(x), training=self.training)))
+            x = self.max_pool_1(tf.keras.activations.relu(self.bn_1(self.conv_1(x), training=self.training)))
             # Conv block #2
-            x = tf.keras.activations.relu(self.max_pool_2(self.bn_2(self.conv_2(x), training=self.training)))
+            x = self.max_pool_2(tf.keras.activations.relu(self.bn_2(self.conv_2(x), training=self.training)))
             # Conv block #3
-            x = tf.keras.activations.relu(self.max_pool_3(self.bn_3(self.conv_3(x), training=self.training)))
+            x = self.max_pool_3(tf.keras.activations.relu(self.bn_3(self.conv_3(x), training=self.training)))
             # Conv block #4
-            x = tf.keras.activations.relu(self.max_pool_4(self.bn_4(self.conv_4(x), training=self.training)))
+            x = self.max_pool_4(tf.keras.activations.relu(self.bn_4(self.conv_4(x), training=self.training)))
         
         elif self.with_bn is False:
             # Conv block #1
-            x = tf.keras.activations.relu(self.max_pool_1(self.conv_1(x)))
+            x = self.max_pool_1(tf.keras.activations.relu(self.conv_1(x)))
             # Conv block #2
-            x = tf.keras.activations.relu(self.max_pool_2(self.conv_2(x)))
+            x = self.max_pool_2(tf.keras.activations.relu(self.conv_2(x)))
             # Conv block #3
-            x = tf.keras.activations.relu(self.max_pool_3(self.conv_3(x)))
+            x = self.max_pool_3(tf.keras.activations.relu(self.conv_3(x)))
             # Conv block #4
-            x = tf.keras.activations.relu(self.max_pool_4(self.conv_4(x)))
-            
+            x = self.max_pool_4(tf.keras.activations.relu(self.conv_4(x)))
 
         # Fully Connect Layer
         x = self.fc(x)

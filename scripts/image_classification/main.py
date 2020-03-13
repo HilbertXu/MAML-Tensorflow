@@ -187,11 +187,11 @@ def maml_train(model, batch_generator):
     test_min_losses = []
     test_max_accs = []
 
-    def _test_step(test_set):
+    def _maml_finetune_step(test_set):
         # Set up recorders for test batch
         batch_loss = [0 for _ in range(meta_batchsz)]
         batch_acc = [0 for _ in range(meta_batchsz)]
-        # Set up copied model
+        # Set up copied models
         copied_model = MetaLearner.hard_copy(model, args)
         for idx, task in enumerate(test_set):
             # Slice task to support set and query set
@@ -266,14 +266,40 @@ def maml_train(model, batch_generator):
     # For each epoch update model total_batches times
     start = time.time()
     for step in range(total_batches+1):
+        # Get a batch data
+        batch_set = batch_generator.train_batch()
+        # batch_generator.print_label_map()
+        # Run maml train step
+        batch_loss, batch_acc = _maml_train_step(batch_set)
+        if visual:
+            # Write histogram
+            write_histogram(model, summary_writer, step)
+        # Record Loss
+        losses.append(tf.reduce_mean(batch_loss).numpy())
+        accs.append(tf.reduce_mean(batch_acc).numpy())
+        # Write to Tensorboard
+        with summary_writer.as_default():
+            tf.summary.scalar('query loss', tf.reduce_mean(batch_loss), step=step)
+            tf.summary.scalar('query accuracy', tf.reduce_mean(batch_acc), step=step)
+        
+        # Print train result
+        if step % print_steps == 0 and step > 0:
+            batch_loss = [loss.numpy() for loss in batch_loss]
+            batch_acc = [acc.numpy() for acc in batch_acc]
+            print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}; Time to run {} Steps: {}'.format(step, batch_loss, batch_acc, print_steps, time.time()-start))
+            start = time.time()
+            # Uncomment to see the sampled folders of each task
+            # train_ds.print_label_map()
+
+        # Save checkpoint
         if step % ckpt_steps == 0 and step > 0:
-            print ('save checkpoints')
             checkpoint.save(ckpt_dir+'maml_model.ckpt')
+
         # Evaluating model
         if step % test_steps == 0 and step > 0:
             test_set = batch_generator.test_batch()
             batch_generator.print_label_map()
-            test_loss, test_acc = _test_step(test_set)
+            test_loss, test_acc = _maml_finetune_step(test_set)
             with summary_writer.as_default():
                 tf.summary.scalar('test loss', tf.reduce_mean(test_loss), step=step)
                 tf.summary.scalar('test accuracy', tf.reduce_mean(test_acc), step=step)
@@ -285,34 +311,7 @@ def maml_train(model, batch_generator):
             test_accs.append(test_acc)
             print ('Test Losses: {}, Test Accuracys: {}'.format(test_loss, test_acc))
             print ('=====================================================================')
-        # Meta train step
-        else:
-            # Get a batch data
-            batch_set = batch_generator.train_batch()
-            # batch_generator.print_label_map()
-            # Run maml train step
-            batch_loss, batch_acc = _maml_train_step(batch_set)
-            if visual:
-                # Write histogram
-                write_histogram(model, summary_writer, step)
-            # Record Loss
-            losses.append(tf.reduce_mean(batch_loss).numpy())
-            accs.append(tf.reduce_mean(batch_acc).numpy())
-            # Write to Tensorboard
-            with summary_writer.as_default():
-                tf.summary.scalar('query loss', tf.reduce_mean(batch_loss), step=step)
-                tf.summary.scalar('query accuracy', tf.reduce_mean(batch_acc), step=step)
-        
-            # Print train result
-            if step % print_steps == 0 and step > 0:
-                batch_loss = [loss.numpy() for loss in batch_loss]
-                batch_acc = [acc.numpy() for acc in batch_acc]
-                print ('[STEP. {}] Task Losses: {}; Task Accuracies: {}; Time to run {} Steps: {}'.format(step, batch_loss, batch_acc, print_steps, time.time()-start))
-                start = time.time()
-                # Uncomment to see the sampled folders of each task
-                # train_ds.print_label_map()
-                # Save checkpoint
-                
+        # Meta train step            
     
     # Record training history
     os.chdir(args.his_dir)
@@ -355,7 +354,7 @@ def eval_model(model, batch_generator, num_steps=None):
     if num_steps is None:
         num_steps = (0, 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
     # Generate a batch data
-    batch_set = batch_generator.batch()
+    batch_set = batch_generator.test_batch()
     # Print the label map of each task
     batch_generator.print_label_map()
     # Use a copy of current model
@@ -447,12 +446,12 @@ if __name__ == '__main__':
     # Training options
     argparse.add_argument('--meta_batchsz', type=int, help='Number of tasks in one batch', default=4)
     argparse.add_argument('--update_steps', type=int, help='Number of inner gradient updates for each task', default=5)
-    argparse.add_argument('--update_steps_test', type=int, help='Number of inner gradient updates for each task while testing', default=5)
+    argparse.add_argument('--update_steps_test', type=int, help='Number of inner gradient updates for each task while testing', default=10)
     argparse.add_argument('--inner_lr', type=float, help='Learning rate of inner update steps, the step size alpha in the algorithm', default=1e-2) # 0.1 for ominiglot
     argparse.add_argument('--meta_lr', type=float, help='Learning rate of meta update steps, the step size beta in the algorithm', default=1e-3)
-    argparse.add_argument('--total_batches', type=int, help='Total update steps for each epoch', default=10)
+    argparse.add_argument('--total_batches', type=int, help='Total update steps for each epoch', default=40000)
     # Log options
-    argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=5)
+    argparse.add_argument('--ckpt_steps', type=int, help='Number of steps for recording checkpoints', default=5000)
     argparse.add_argument('--test_steps', type=int, help='Number of steps for evaluating model', default=5)
     argparse.add_argument('--print_steps', type=int, help='Number of steps for prints result in the console', default=1)
     argparse.add_argument('--log_dir', type=str, help='Path to the log directory', default='../../logs/')

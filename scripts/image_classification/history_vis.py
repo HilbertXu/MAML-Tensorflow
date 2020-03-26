@@ -49,7 +49,7 @@ def data_preprocess(data):
  
 def smooth(data):
     # tmp = scipy.signal.savgol_filter(data, 53, 3)
-    tmp = signal.savgol_filter(data, 19, 3)
+    tmp = signal.savgol_filter(data, 49, 3)
     return tmp
 
 def plot_figure(loss, smooth_loss, acc, smooth_acc):

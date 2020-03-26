@@ -6,6 +6,7 @@
 /dataset
 */__pycache__/
 /weights
+/logs
 
 scripts/sine_fitting/__pycache__/
 scripts/image_classification/__pycache__/

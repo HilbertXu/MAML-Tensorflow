@@ -84,12 +84,25 @@ if __name__ == '__main__':
     if args.mode == 'train':
         loss = read_file('{}-{}-way-{}-shot-train.txt'.format(dataset, n_way, k_shot))
         acc = read_file('{}-{}-way-{}-shot-acc.txt'.format(dataset, n_way, k_shot))
+        # calculate means and std of last 1000 iteration
+        acc_mean = np.mean(acc[-1000:])
+        acc_std = np.std(acc[-1000:])
+        print (acc_mean, acc_std)
+
     elif args.mode == 'test':
         loss = read_file('{}-{}-way-{}-shot-loss-test.txt'.format(dataset, n_way, k_shot))
         acc = read_file('{}-{}-way-{}-shot-acc-test.txt'.format(dataset, n_way, k_shot))
         # pre process
         loss = data_preprocess(loss)
         acc = data_preprocess(acc)
+        # calculate means and std of last 200 iteration
+        # calculate means and std of last 1000 iteration
+        acc_mean = np.mean(acc[-200:])
+        acc_std = np.std(acc[-200:])
+        print (acc_mean, acc_std)
+
+    
+
 
     smooth_loss = smooth(loss)
     smooth_acc = smooth(acc)

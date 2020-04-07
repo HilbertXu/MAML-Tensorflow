@@ -225,10 +225,10 @@ def maml_train(model, batch_generator):
         # Because GradientTape only auto record tranable_variables of model
         # But the copied_model.inner_weights is tf.Tensor, so they won't be automatically watched
         with tf.GradientTape() as outer_tape:
-            # Set up copied model
-            copied_model = model
             # Use the average loss over all tasks in one batch to compute gradients
             for idx, task in enumerate(batch_set):
+                # Set up copied model
+                copied_model = model
                 # Slice task to support set and query set
                 support_x, support_y, query_x, query_y = task
                 if visual:
@@ -465,6 +465,7 @@ if __name__ == '__main__':
     print ('Build model')
     model = MetaLearner.initialize(model)
     model.summary()
+    tf.keras.utils.plot_model(model, to_file='../model.png',show_shapes=True,show_layer_names=True,dpi=128)
     # Initialize task generator
     batch_generator = TaskGenerator(args)
 

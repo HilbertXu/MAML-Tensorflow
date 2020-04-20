@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import gym
 '''
 CartPole-V0
@@ -12,83 +13,156 @@ env = gym.make('CartPole-v0')
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Dense, Dropout
 
 STATE_DIM = 4
 ACTION_DIM = 2
 
-model = tf.keras.Sequential()
-model.add(Dense(100, input_shape=(STATE_DIM,), activation='relu'))
-model.add(Dropout(0.1))
-model.add(Dense(ACTION_DIM, activation='softmax'))
+# Set the precsion of keras otherwise the sum of probability given by softmax will not be 1
+tf.keras.backend.set_floatx('float64')
 
-model.summary()
-model.compile(loss='mse', optimizer='adam')
+class PGModel(tf.keras.models.Model):
+    def __init__(self, input_dim, output_dim):
+        super(PGModel, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
 
-def choose_action(s):
-    '''
-    Choose action according to its probability
-    '''
-    prob = model.predict(np.array([s]))[0]
-    return np.random.choice(len(prob), p=prob)
+        # Initialize layers
+        self.dense_1 = tf.keras.layers.Dense(128, input_shape=(None,self.input_dim), activation='relu')
+        # tf.keras.layers.Dropout(0.1)
+        self.all_act = tf.keras.layers.Dense(self.output_dim)
+    
+    def call(self, state):
+        x = self.dense_1(state)
+        x = self.all_act(x)
+        self.logits = x
+        output = tf.keras.activations.softmax(x)
+        #output = tf.nn.softmax(x)
+        return output, self.logits
+    
+class PolicyGradient(object):
+    def __init__(
+        self,
+        lr = 0.01,
+        state_dim=STATE_DIM,
+        action_dim=ACTION_DIM,
+        reward_decay=0.95
+    ):
+        # Learning rate
+        self.lr = lr
+        # Dimension of state space
+        self.state_dim = state_dim
+        # Dimension of action space
+        self.action_dim = action_dim
+        # reward decay rate
+        self.reward_decay = reward_decay
+        # Observation, actions, reward of an episode
+        self.ep_obs, self.ep_acts, self.ep_rs = [], [], []
+        # Policy Net
+        self.model = PGModel(STATE_DIM, ACTION_DIM)
+        # Optimizer
+        self.optimizer = tf.keras.optimizers.Adam(self.lr)
+    
+    def loss_func(self, predict, actions, ep_rs_norm):
+        actions = tf.one_hot(self.ep_acts, depth=self.action_dim)
+        neg_log_prob = tf.nn.softmax_cross_entropy_with_logits(logits=predict, labels=actions)
+        loss = tf.reduce_mean(neg_log_prob*ep_rs_norm)
+        return loss
+    
+    def store_transition(self, s, a, r):
+        self.ep_obs.append(s)
+        self.ep_acts.append(a)
+        self.ep_rs.append(r)
 
-def reward_discount(rewards, gamma=0.95):
-    '''
-        calculate the rewards with discount ratio
-        last step：1
-        last-1 step：1 + 0.95 * 1 = 1.95
-        last-2 step：1 + 0.95 * 1.95 = 2.8525
-        last-3 step：1 + 0.95 * 2.8525 = 3.709875
-        ...
-    '''
-    prior = 0
-    # Out has the same shape og input rewards
-    out = np.zeros_like(rewards)
-    for i in reversed(range(len(rewards))):
-        # Reverse all rewards
-        prior = prior * gamma + rewards[i]
-        out[i] = prior
-    return out/np.std(out - np.mean(out))
+    def choose_action(self, state):
+        prob_dist, _ = self.model(np.array([state]))
+        action = np.random.choice(len(prob_dist[0]), p=prob_dist[0])
+        return action
+    
+    def discount_and_norm_reward(self):
+        out = np.zeros_like(self.ep_rs)
+        dis_reward = 0 
 
-def train(records):
-    s_batch = np.array([record[0] for record in records])
-    # action 独热编码处理，方便求动作概率，即 prob_batch
-    a_batch = np.array([[1 if record[1] == i else 0 for i in range(ACTION_DIM)]
-                        for record in records])
-    # 假设predict的概率是 [0.3, 0.7]，选择的动作是 [0, 1]
-    # 则动作[0, 1]的概率等于 [0, 0.7] = [0.3, 0.7] * [0, 1]
-    prob_batch = model.predict(s_batch) * a_batch
-    r_batch = discount_rewards([record[2] for record in records])
+        # Calculate reward with discount
+        for i in reversed(range(len(self.ep_rs))):
+            dis_reward = dis_reward +  self.reward_decay * self.ep_rs[i]
+            out[i] = dis_reward
+        # Normalization
+        out -= np.mean(out)
+        out /= np.std(out)
+        return out
+    
+    def train_op(self):
+        discounted_reward = self.discount_and_norm_reward()
 
-    model.fit(s_batch, prob_batch, sample_weight=r_batch, verbose=0)
+        with tf.GradientTape() as tape:
+            prob_dist, logits = self.model(np.vstack(self.ep_obs))
+            loss = self.loss_func(logits, self.ep_acts, discounted_reward)
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        self.ep_obs, self.ep_acts, self.ep_rs = [], [], []
 
-episodes = 2000  # 至多2000次
-score_list = []  # 记录所有分数
-for i in range(episodes):
-    s = env.reset()
-    score = 0
-    replay_records = []
+
+
+
+# Use default parameters
+agent_pg = PolicyGradient()
+# Make gym environment
+env = gym.make('CartPole-v0')
+env.seed(1)
+env = env.unwrapped
+DISPLAY_REWARD_THRESHOLD = 100  # renders environment if total episode reward is greater then this threshold
+RENDER = False  # rendering wastes time
+
+print(env.action_space)
+print(env.observation_space)
+print(env.observation_space.high)
+print(env.observation_space.low)
+
+'''
+此处训练时遇到了Policy Gradient的一个主要问题，就是沿
+'''
+
+for ep_idx in range(2000):
+    observation = env.reset()
     while True:
-        a = choose_action(s)
-        next_s, r, done, _ = env.step(a)
-        replay_records.append((s, a, r))
+        if RENDER:
+            env.render()
+        # Choose action with current policy
+        action = agent_pg.choose_action(observation)
+        # Execute the action
+        _obs, reward, done, info = env.step(action)
+        # Store ob, action, reward
+        agent_pg.store_transition(_obs, action, reward)
+        # Update observation
+        observation = _obs
 
-        score += r
-        s = next_s
         if done:
-            train(replay_records)
-            score_list.append(score)
-            print('episode:', i, 'score:', score, 'max:', max(score_list))
-            break
-    # 最后10次的平均分大于 195 时，停止并保存模型
-    if np.mean(score_list[-10:]) > 195:
-        model.save('CartPole-v0-pg.h5')
-        break
-env.close()
+            ep_rs_sum = sum(agent_pg.ep_rs)
 
-plt.plot(score_list)
-x = np.array(range(len(score_list)))
-smooth_func = np.poly1d(np.polyfit(x, score_list, 3))
-plt.plot(x, smooth_func(x), label='Mean', linestyle='--')
-plt.show()
+            if 'running_reward' not in globals():
+                running_reward = ep_rs_sum
+            else:
+                running_reward = running_reward * 0.99 + ep_rs_sum * 0.01
+            if running_reward > DISPLAY_REWARD_THRESHOLD:
+                RENDER = True
+            print ('Episode: {} Reward: {}'.format(ep_idx, int(running_reward)))
+
+            # Update parameters of policy using the policy gradient
+            agent_pg.train_op()
+
+            break
+        
+            
+
+
+
+
+        
+
+    
+
+        
+        
+
+
 

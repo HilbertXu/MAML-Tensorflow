@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import scipy.misc
 import gym
 '''
 CartPole-V0

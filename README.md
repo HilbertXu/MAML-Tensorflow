@@ -3,6 +3,8 @@ Tensorflow r2.1 reimplementation of Model-Agnostic Meta-Learning from this paper
 
 [Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks](https://arxiv.org/abs/1703.03400)
 
+Reinforcement Learning part is taken from [MoritzTaylor/maml-rl-tf2](https://github.com/MoritzTaylor/maml-rl-tf2) Sincerely Thanks for his fantasic work!!!
+
 ## Project Requirements
 
 1. python 3.x
@@ -109,3 +111,22 @@ For 20-way 1-shot, 0.7 s for one training step
    ```
 
    
+
+## References
+
+This project is, for the most part, a reproduction of the original implementation [cbfinn/maml_rl](https://github.com/cbfinn/maml_rl/) in TensorFlow 2. The experiments are based on the paper
+
+> Chelsea Finn, Pieter Abbeel, and Sergey Levine. Model-agnostic meta-learning for fast adaptation of deep
+> networks. _International Conference on Machine Learning (ICML)_, 2017 [[ArXiv](https://arxiv.org/abs/1703.03400)]
+
+If you want to cite this paper
+
+```
+@article{DBLP:journals/corr/FinnAL17,
+  author    = {Chelsea Finn and Pieter Abbeel and Sergey Levine},
+  title     = {Model-{A}gnostic {M}eta-{L}earning for {F}ast {A}daptation of {D}eep {N}etworks},
+  journal   = {International Conference on Machine Learning (ICML)},
+  year      = {2017},
+  url       = {http://arxiv.org/abs/1703.03400}
+}
+```

@@ -1,3 +1,0 @@
-[submodule "scripts/reinforcement_learning/maml-rl"]
-	path = scripts/reinforcement_learning/maml-rl
-	url = git@github.com:MoritzTaylor/maml-rl-tf2.git

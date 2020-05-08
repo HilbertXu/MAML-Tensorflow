@@ -1,0 +1,6 @@
+[submodule "scripts/reinforcement_learning/maml-rl-tf2"]
+	path = scripts/reinforcement_learning/maml-rl-tf2
+	url = git@github.com:HilbertXu/maml-rl-tf2.git
+[submodule "scripts/reinforcement_learning/maml-rl-pytorch"]
+	path = scripts/reinforcement_learning/maml-rl-pytorch
+	url = git@github.com:HilbertXu/pytorch-maml-rl.git

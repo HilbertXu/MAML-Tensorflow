@@ -10,6 +10,10 @@ import numpy as np
 import scipy.signal as signal
 import matplotlib.pyplot as plt
 
+plt.rcParams['font.sans-serif']=['SimSun'] #用来正常显示中文标签
+plt.rcParams['axes.unicode_minus']=False #用来正常显示负号
+
+
 def read_file(file_name):
     '''
     :param file_name: History file to be read
@@ -54,13 +58,13 @@ def smooth(data):
 
 def plot_figure(loss, smooth_loss, acc, smooth_acc):
     fig = plt.figure(dpi=128, figsize=(10,6))
-    plt.plot(loss, color='coral', alpha=0.2, label='Train Loss')
-    plt.plot(smooth_loss,color='coral', label='Smoothed Loss')
-    plt.plot(acc, color='royalblue', alpha=0.2, label='Train Accuracy')
-    plt.plot(smooth_acc, color='royalblue', label='Smoothed Accuracy')
+    plt.plot(loss, color='coral', alpha=0.2, label='训练误差')
+    plt.plot(smooth_loss,color='coral', label='平滑后的训练误差')
+    plt.plot(acc, color='royalblue', alpha=0.2, label='训练精度')
+    plt.plot(smooth_acc, color='royalblue', label='平滑后的训练精度')
     plt.legend(loc='upper right')
-    plt.title('{} {}-way {}-shot {} Process'.format(dataset, n_way, k_shot, args.mode))
-    plt.xlabel('Meta Steps', fontsize=16)
+    plt.title('{}数据集 {}-way {}-shot 小样本图像分类任务{}过程曲线'.format(dataset, n_way, k_shot, '训练'))
+    plt.xlabel('元批次数', fontsize=16)
     plt.ylabel('', fontsize=16)
     # plt.tick_params(axis='both', which='major', labelsize=16)
     plt.show()

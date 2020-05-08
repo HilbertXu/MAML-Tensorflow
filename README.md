@@ -3,7 +3,7 @@ Tensorflow r2.1 reimplementation of Model-Agnostic Meta-Learning from this paper
 
 [Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks](https://arxiv.org/abs/1703.03400)
 
-Reinforcement Learning part is taken from [MoritzTaylor/maml-rl-tf2](https://github.com/MoritzTaylor/maml-rl-tf2) Sincerely Thanks for his fantasic work!!!
+Reinforcement Learning part is adapted from [MoritzTaylor/maml-rl-tf2](https://github.com/MoritzTaylor/maml-rl-tf2) and [tristandeleu/pytorch-maml-rl](<https://github.com/tristandeleu/pytorch-maml-rl>) Sincerely Thanks for their fantastic works!!!
 
 ## Project Requirements
 
@@ -12,6 +12,7 @@ Reinforcement Learning part is taken from [MoritzTaylor/maml-rl-tf2](https://git
 3. numpy 
 4. matplotlib
 5. ...
+6. All Scripts in image_classification folder is tested on python 3.6.5
 
 ## MiniImagenet Dataset
 
